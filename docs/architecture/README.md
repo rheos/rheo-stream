@@ -4,9 +4,9 @@
 [requirements and scope](../requirements/requirements-and-scope.md) (D1 to D11, R1 to R5, FR 1 to
 FR 53) and the accepted [build plan](../requirements/build-plan.md). The decisions recorded here as
 A1 to A17 are this specification's own calls, made where the requirements deliberately left the
-design open. They become accepted architecture when the maintainer merges the pull request that
-carries them; until then they are proposed, and they are written as decisions with rationale so
-that a reviewer can reject one on its reasoning rather than on its vagueness.
+design open. They are **accepted architecture**: the maintainer reviewed and merged the pull
+request that carried them (PR #7, 2026-09-09). Each is written as a decision with rationale so
+that a later revisit can reject one on its reasoning rather than on its vagueness.
 
 **Source of truth for what the system must do:** the requirements. This specification never
 reopens a settled decision; where it believes one is worth revisiting it says so under

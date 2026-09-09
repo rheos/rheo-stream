@@ -1609,14 +1609,14 @@ which records the rationale for each:
 - The workspace, membership, role, first-release-slice, confirmation-policy, and
   relationships-contract questions are answered there, and a record-level deletion
   path for observations, parties, and opportunities is proposed there as the
-  deletion half of question 19. These five (R1 to R5 in that document) are
-  proposals taken on the maintainer's behalf, ratified by the maintainer's merge of
-  the pull request that carries them; until that merge they are proposed, not
-  settled. Every other open question below carries a recorded disposition.
+  deletion half of question 19. These five (R1 to R5 in that document) were
+  proposals taken on the maintainer's behalf and were ratified by the maintainer's
+  merge of the pull request that carried them (PR #5, 2026-09-09). Every other open
+  question below carries a recorded disposition.
 
 Settled by the [architecture specification](../architecture/README.md), as decisions
-A1 to A17 with rationale in the document each names; proposed until the maintainer
-merges the pull request that carries them:
+A1 to A17 with rationale in the document each names; accepted by the maintainer's
+review and merge of the pull request that carried them (PR #7, 2026-09-09):
 
 - The per-workspace storage unit is a database, not a schema; one Postgres schema
   per module inside it ([storage](../architecture/storage-and-workspaces.md)).
