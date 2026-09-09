@@ -1592,8 +1592,8 @@ which records the rationale for each:
 - The full module manifest and lifecycle contract are specified, while the first
   release implements install and enable only. Disable, remove, purge, and restore
   are a defined later milestone.
-- An OAuth code-host provider is the first login provider, behind a pluggable
-  identity-provider boundary. Command-line and MCP access uses local tokens.
+- GitHub OAuth is the first login provider, behind a pluggable identity-provider
+  boundary. Command-line and MCP access uses local tokens.
 - URL topology is configuration. Single-host path mode is the default for
   self-hosters; subdomain-per-module is supported and is what the reference
   deployment uses. See the recorded change of direction below.

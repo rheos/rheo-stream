@@ -42,7 +42,7 @@ ships in this phase.
 - Workspace and storage foundation: the control plane (accounts, workspace registry), the
   per-workspace database provisioning path, migration tracking per module, and the storage
   adapter seam.
-- Identity: the identity-provider boundary with one OAuth code-host provider, plus locally
+- Identity: the identity-provider boundary with GitHub OAuth behind it, plus locally
   issued tokens for command-line and MCP clients, issued from an authenticated web session or by
   an operator-level command on a headless install.
 - The operator-level command that adds a second member to a workspace against the control plane.
@@ -105,7 +105,7 @@ ships in this phase.
 7. A request carrying a valid record or operation identifier belonging to another workspace is
    refused by the HTTP API, the MCP façade, and the job dispatcher alike. *(Scenario: Wrong
    workspace or channel audience; FR 1.)*
-8. A person signs in through the OAuth code-host provider and the resulting session carries an
+8. A person signs in through GitHub OAuth and the resulting session carries an
    actor, a workspace, and a role. The provider is reached only through the identity-provider
    boundary, verified two ways: the second identity-provider implementation, which is a test
    double and not a shipped provider, is substituted behind the same boundary and leaves the
