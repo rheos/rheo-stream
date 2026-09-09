@@ -1,11 +1,9 @@
 # Rheo Stream — phased build plan
 
-**Status:** Proposed plan skeleton, awaiting maintainer ratification. Phases one to three are
-planned to implementable depth; later phases are sketches that will be planned when their
-predecessor lands. The decisions this plan is built on include five decisions taken on the
-maintainer's behalf (R1 to R5 in the companion requirements document). The maintainer's review
-of the pull request that carries these documents is the ratification step; until that review,
-treat R1 to R5 as proposed rather than accepted. This header is updated on merge.
+**Status:** Accepted. Ratified by the maintainer's review and merge of the pull request that
+carried these documents (PR #5, 2026-09-09). Phases one to three are planned to implementable
+depth; later phases are sketches that will be planned when their predecessor lands. R1 to R5 in
+the companion requirements document are ratified by that merge.
 **Companion:** [Requirements and scope](requirements-and-scope.md), which carries the decisions,
 functional requirements (cited as FR *n*), and the release-one scope boundary.
 **Decision citations:** D *n* is a settled decision and R *n* is a decision taken on the

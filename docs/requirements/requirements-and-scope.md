@@ -1,12 +1,12 @@
 # Rheo Stream — requirements and scope
 
-**Status:** Proposed requirements for release one, awaiting maintainer ratification. The eleven
-settled decisions D1 to D11 record directions the maintainer already gave. The five decisions
-under [Questions resolved here](#questions-resolved-here), R1 to R5, were taken on the
-maintainer's behalf rather than by the maintainer, and the maintainer's review of the pull
-request that carries this document is the ratification step. Until that review, treat R1 to R5
-as proposals with recorded reasoning, not as accepted decisions. This header is updated on
-merge.
+**Status:** Accepted. Ratified by the maintainer's review and merge of the pull request that
+carried this document (PR #5, 2026-09-09). The eleven settled decisions D1 to D11 record
+directions the maintainer already gave; the five decisions under
+[Questions resolved here](#questions-resolved-here), R1 to R5, were taken on the maintainer's
+behalf and are ratified by that merge. The `circuit.` shell-host name was confirmed at
+ratification, with the reference deployment additionally keeping the `app.` name in reserve as a
+redirect to `circuit.`.
 **Lineage:** This document supersedes no earlier requirements document. The path it replaced,
 `docs/requirements/rheo-stream-requirements.md`, held no requirements.
 **Source:** [Idea document](../ideas/rheo-stream-idea.md), including its 26 architectural
