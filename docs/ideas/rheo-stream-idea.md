@@ -1568,9 +1568,72 @@ history.
 - AI runtime selection is configurable. Claude CLI (`claude -p`) and OpenRouter
   are required execution options; Codex CLI (`codex exec`) is an additional target
   whose integration must be validated. Domain modules and channels stay independent
-  of the selected runtime and model.
+  of the selected runtime and model. Their rollout order is settled below.
 - Ignore rules accompany a clean-publication process; they do not make existing
   tracked data, Git history, or packaged artifacts safe to publish by themselves.
+
+Settled by the [requirements and scope document](../requirements/requirements-and-scope.md),
+which records the rationale for each:
+
+- Postgres is the sole reference storage backend for the first release, with one
+  database or schema per workspace and a small shared control plane for accounts,
+  the workspace registry, and billing. Per-workspace SQLite becomes a contract goal
+  for a possible later local-first edition, not first-release code.
+- The implementation stack is a Python core (FastAPI domain services) plus a
+  Next.js web interface, chosen after an explicit comparison with a single
+  TypeScript monolith.
+- Recallatron is the first real module after the walking skeleton, then the
+  opportunity core, then the optional job-search workflow.
+- `ClaudeCliRuntime` ships first; the OpenRouter adapter is the required second
+  implementation for v1.0; Codex CLI remains a validation target. See the recorded
+  change of direction below.
+- The full module manifest and lifecycle contract are specified, while the first
+  release implements install and enable only. Disable, remove, purge, and restore
+  are a defined later milestone.
+- An OAuth code-host provider is the first login provider, behind a pluggable
+  identity-provider boundary. Command-line and MCP access uses local tokens.
+- URL topology is configuration. Single-host path mode is the default for
+  self-hosters; subdomain-per-module is supported and is what the reference
+  deployment uses. See the recorded change of direction below.
+- The web interface is ported from the two predecessor applications rather than
+  rewritten, under a bounded port inventory and the publication rules.
+- The memory port includes a real retrieval-layer rework, since the predecessor's
+  memory layer uses `sqlite-vec` and FTS5 rather than pgvector. It is contained
+  behind the retrieval adapter.
+- The reference instance is a single-server container deployment behind a reverse
+  proxy, so the web interface must not depend on hosting-platform-only features.
+- The workspace, membership, role, first-release-slice, confirmation-policy, and
+  relationships-contract questions are answered there; every other open question
+  below carries a recorded disposition.
+
+### Recorded changes of direction
+
+Later documents should not reverse settled direction without recording the reason.
+Two reversals are recorded here.
+
+1. **Runtime rollout order.** This document states that Claude CLI and OpenRouter
+   execution "are explicit requirements." That is softened to a rollout order:
+   `ClaudeCliRuntime` ships first and the OpenRouter adapter is required before
+   v1.0. Reason: the requirement existed to stop the architecture assuming one
+   runtime, and requiring the structurally different second adapter before v1.0
+   serves that purpose completely. Read as a first-slice requirement it would delay
+   every domain decision behind two runtime integrations for no design benefit.
+   Guardrail 4 is unchanged and is enforced by the runtime contract from the first
+   adapter.
+2. **Module subdomains.** This document states that "individual module subdomains
+   are unnecessary unless the modules later become independently deployed public
+   services." That is overridden. Subdomain-per-module is supported and is what the
+   reference deployment uses (`leads.`, `current.`, and so on, alongside `api.`,
+   `mcp.`, and `docs.`, with `tuttle.` reserved for the integration surface only).
+   Reason: the maintainer wants module boundaries visible in the address bar of the
+   instance used daily, and one application serving every host through host-based
+   routing costs a routing table rather than a deployment per module. Constraints:
+   modules are not separately deployed; the session cookie is scoped to the parent
+   domain in subdomain mode; single-host path mode remains the default and stays
+   continuously exercised under guardrail 15; and a hosted multi-tenant edition must
+   choose deliberately between module subdomains and per-tenant subdomains, because
+   they compete for the same namespace level and a wildcard certificate covers one
+   level only.
 
 ### Preferred but still to validate
 
@@ -1610,18 +1673,21 @@ history.
 
 ### Open decisions
 
-- Final storage topology for each deployment mode.
+- Storage topology for the hosted edition. The first release is settled above.
 - Encryption implementation and key management.
-- Open-source license and commercial model.
-- Exact first public-release scope.
+- Open-source license and commercial model, deliberately deferred to the
+  framework-proof phase.
 - Detailed domain schemas, events, API, and MCP contracts.
-- Exact core/module boundary, manifest and capability contracts, relationships
-  scope, domain-pack composition, and module lifecycle acceptance criteria.
-- Exact pipeline configuration limits, version migration, identity resolution,
-  data ownership, and contact-purpose/retention contracts.
-- Private storage paths and configuration precedence, reusable-pack export rules,
-  secret storage, and publication/package-content checks.
-- Migration sequence, acceptance criteria, and release plan.
+- Module manifest and capability compatibility contracts, domain-pack composition,
+  and module lifecycle acceptance criteria beyond install and enable. The
+  relationships-module contract and the core/module boundary for the first release
+  are settled above.
+- Pipeline configuration limits, version migration, and the contact-purpose and
+  retention contracts beyond the first release. Identity resolution rules and data
+  ownership between Rheo Stream and an external CRM are settled above.
+- Reusable-pack export rules and packaging-allowlist detail. Private storage paths,
+  configuration precedence, secret storage, and publication checks for the first
+  release are settled above.
 - Voice and Telegram providers and operational details.
 - Depth and timing of the Tuttle integration.
 
