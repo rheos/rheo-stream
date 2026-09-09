@@ -16,9 +16,8 @@ IdentityProvider
 ```
 
 That is the whole boundary. `rheo_core.identity` owns it, resolves a `ProviderIdentity` to an
-`account` through `control.identity`, creates the account on first login when the deployment
-setting `identity.allow_signup` permits (default `true` on a fresh install, `false` once an owner
-exists unless changed), and creates the session. Providers live in
+`account` through `control.identity`, creates the account on first login when signup is open
+([first run](#first-run-and-who-may-sign-up)), and creates the session. Providers live in
 `rheo_core.identity.providers.<provider_id>`; the GitHub implementation is the only shipped one,
 configured by `control.identity_provider` with the client secret as a reference. Domain modules
 import neither the providers package nor the boundary; a CI check asserts it (criterion 8). The
@@ -28,16 +27,44 @@ harness only.
 An account is not a workspace. Membership is many-to-many with a role (R1), and every context
 carries the role read from `control.membership` at request time, never cached in the session.
 
+## First run, and who may sign up
+
+On a fresh deployment the control plane has no account. The sequence is fixed:
+
+1. **First login creates the first account.** Signup is *computed*, not configured: a login
+   whose identity is unknown creates an account when the control plane holds no account at all,
+   or when the deployment setting `identity.allow_signup` is explicitly `true`. The setting's
+   package default is null, and null means "open until the first account exists, closed after",
+   so an operator who never touches it gets a deployment that admits exactly one person and does
+   not change underneath them.
+2. **The first workspace is created by that account** through the shell's first-run screen or
+   `rheo workspace create --owner <account>`, and the creator is written as `owner` in
+   `control.membership`. Every later workspace works the same way: its creator is its owner.
+3. **A second person needs an account before a membership.** With signup closed, the operator
+   pre-registers them: `rheo account create --provider github --subject <provider subject>
+   --display-name <name>` writes the `account` and `identity` rows, so their first login resolves
+   to an existing account. Then `rheo member add --workspace <id> --account <id> --role member`
+   creates the membership (R1). Setting `identity.allow_signup = true` is the alternative and is
+   the operator's explicit choice.
+
 ## Accounts, sessions, and the active workspace
 
 A web session is a `control.session` row. Its `active_workspace_id` is the only source of "which
-workspace" for a web request. The workspace switcher calls `core.session.set_active_workspace`,
-which checks membership and updates the row; it is the one operation that takes a workspace id
-as input, and it takes it as the *target* of a membership check, not as routing. After a switch,
-every request in that session routes to the new workspace with no identifier in any URL, which is
-what criterion 6 requires literally. Session lifetime: idle expiry `identity.session_idle_days`
-(default 14), absolute `identity.session_max_days` (default 30); logout revokes the row, which
-ends every host's cookie at once because every cookie carries the same session id.
+workspace" for a web request. The workspace switcher calls `POST /auth/session/workspace` with
+`target_workspace_id`: a control-plane session endpoint served by the core's identity routes,
+**outside the operation registry**, which is why the registry's reserved-field rule
+([module contract](module-contract.md#operations-tools-events)) does not apply to it. It checks
+that the session's account holds a membership in the target, updates the row, records the switch
+on the session (`active_workspace_changed_at`) and in the structured log, and returns. It routes
+nothing by the value: it is the target of a membership check, and the next request's storage
+routing still runs from `active_workspace_id` through the registry
+([storage](storage-and-workspaces.md#server-derived-routing-fr-2)). Criterion 6's test covers
+it from both sides: a `workspace_id` supplied to any registered operation is ignored, and this
+endpoint refuses a workspace the account is not a member of. After a switch, every request in
+that session routes to the new workspace with no identifier in any URL, which is what criterion 6
+requires literally. Session lifetime: idle expiry `identity.session_idle_days` (default 14),
+absolute `identity.session_max_days` (default 30); logout revokes the row, which ends every
+host's cookie at once because every cookie carries the same session id.
 
 ## Tokens for CLI and MCP (FR 4)
 
@@ -72,11 +99,19 @@ reverse proxy cannot strip what is sent to a different server. This specificatio
 - When an application host receives a request with no valid cookie, the web tier redirects to
   `<identity>/auth/continue?return=<absolute url>`, built through the routing configuration
   from the forwarded host, never from a hard-coded name.
-- `/auth/continue` on the identity host: with a valid session cookie, it writes a
-  `control.session_grant` row (a random 256-bit code, its SHA-256 stored, `target_host` set to
-  the return URL's host, 60-second expiry, single use) and redirects to
-  `<return host>/auth/continue?code=<code>`. Without one, it starts the login flow and returns
-  here afterward.
+- `/auth/continue` on the identity host first checks the `return` URL: its scheme must be the
+  configured scheme and its host must be in `RoutingConfig`'s **application-host set** (the
+  shell host, the identity host, and the enabled module hosts in subdomain mode; the single host
+  in path mode). Any other host is refused with `invalid_return` and no grant is written, so the
+  identity host cannot be used as an open redirect or made to mint a grant for an arbitrary
+  label. With a valid session cookie and a valid return, it writes a `control.session_grant` row
+  (a random 256-bit code, its SHA-256 stored, `target_host` set to the return URL's host,
+  60-second expiry, single use) and redirects to `<return host>/auth/continue?code=<code>`.
+  Without a cookie, it starts the login flow and returns here afterward.
+- The reverse proxy routes only the hosts the routing configuration names. The template in
+  `deploy/` enumerates them from the same configuration; it never routes a bare `*.<base_host>`
+  wildcard to the application, so a label nobody configured reaches no listener and can neither
+  receive a cookie nor complete a grant.
 - `/auth/continue` on the application host: the core (which serves `/auth/*` on every
   application host) looks up the code's hash, checks `target_host` equals the request's forwarded
   host and the code is unused and unexpired, marks it used, sets the host-only cookie for this
@@ -93,6 +128,20 @@ CSRF: state-changing web requests are Next.js server actions and route handlers 
 `Access-Control-Allow-Origin` is emitted anywhere by default; `api.cors_origins` (deployment
 setting, empty) exists for a later second front end and is not needed by the first-party web
 tier, which reaches the core server-side.
+
+**The internal API's trust boundary.** The core process has two listeners. The public one is
+what the proxy routes to (`/auth/*`, the `api` surface, the `mcp` surface). The internal one is a
+second port on the container network only (`RHEO_CORE_INTERNAL_URL`, `http://core:8100` in the
+reference deployment); the proxy has no rule that reaches it and `deploy/` publishes no port for
+it. The web tier, having read the `rheo_session` cookie, calls the internal listener with the
+session id in the `X-Rheo-Session` header and the forwarded host in `X-Rheo-Host`, plus a shared
+secret in `X-Rheo-Internal` that the web tier reads from its own environment
+(`RHEO_INTERNAL_SECRET`) and the core resolves through the internal listener's secret scope
+(`secret://env/RHEO_INTERNAL_SECRET` by default). The internal listener reads the session id from that
+header and ignores cookies; the public listener reads cookies on `/auth/*` only and ignores the
+header. A browser therefore cannot reach the internal listener at all, and cannot make the public
+listener treat a header as a session, which is what keeps the `api` surface cookie-free in fact
+and not only by policy.
 
 ## URL topology as configuration (D7, FR 47)
 

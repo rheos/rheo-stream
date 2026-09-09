@@ -49,9 +49,11 @@ share one image.
 
 The proxy's routing table is the same in both topologies ([identity and topology](identity-and-topology.md#the-routing-table)):
 `/auth/*`, `/api/*`, and `/mcp` go to `core`; everything else on an application host goes to
-`web`. The web tier reaches `core` over the container network at `RHEO_CORE_INTERNAL_URL`,
-forwarding the session; the browser never calls the `api` host for the first-party interface,
-which is why release one needs no CORS allowlist.
+`web`. The web tier reaches `core` over the container network at `RHEO_CORE_INTERNAL_URL`, a
+second listener the proxy never exposes, forwarding the session id in a header the public
+listener ignores ([the internal API's trust boundary](identity-and-topology.md#sessions-and-cookies));
+the browser never calls the `api` host for the first-party interface, which is why release one
+needs no CORS allowlist.
 
 `apps/cli` is the `rheo` operator command (workspace creation and repair, member addition, token
 issuance on a headless install, migrate, export, restore, doctor). It runs in the `core` image and
@@ -67,10 +69,10 @@ and no service accepts a workspace or actor any other way (FR 2, FR 23).
 | --- | --- | --- |
 | `workspace_id` | uuid | web: the session's `active_workspace_id`; MCP and CLI: the token's workspace; job: the job row's database; intake: the connection's workspace |
 | `actor` | `Actor(kind, id)` | `kind` in `account`, `token`, `operator`, `system`, `connection`; `id` is the account, token, or connection id, or null for `system` |
-| `role` | `owner`, `member`, or `operator` | from `control.membership`, or `operator` for the CLI |
+| `role` | `owner`, `member`, `operator`, or `service` | from `control.membership` for an account or a token's account; `operator` for the CLI; `service` for a `connection` actor and a `system` actor |
 | `entry` | `web`, `api`, `mcp`, `cli`, `job`, `intake`, `channel` | which boundary built the context |
 | `audience` | `Audience(kind, id)` | who may see outputs: `session`, `token`, `job`, or `channel:<conversation>` |
-| `operation_set` | frozen set of operation names, or `all` | from the token; `all` for a web session and the operator |
+| `operation_set` | frozen set of operation names, or `all` | from the token; `all` for a web session and the operator; for a `connection` actor the operations its module's `connector_bindings` name for that transport; for a `system` actor at `entry = job` the operations whose declared roles include `service` |
 | `enabled_modules` | frozen set of module ids | from `core.module_state` for this workspace |
 | `request_id` | uuid | for logs and the audit record |
 
@@ -82,6 +84,17 @@ job loader, and the intake receiver. Channels (phase six) add a fifth.
 A context whose workspace is not `active` in the registry, whose membership no longer exists, or
 whose token is revoked or expired, is refused at the boundary with a distinct non-success state
 (criterion 9) and nothing downstream runs.
+
+**Actors that are not people.** A `connection` actor (the intake receiver, after the signature
+verified) carries `role = service` and an operation set of exactly the operations the Leads
+manifest binds to that transport (`leads.intake.accept_delivery` for the webhook), so the
+registry's set check and role check pass for that call and fail for anything else. A `system`
+actor (the worker running a job or delivering an event) carries `role = service` and the set of
+operations whose declaration lists `service` among its roles; every operation a consumer or job
+handler calls (`relationships.party.resolve_or_create`, `leads.opportunity.create_from_observation`,
+`recallatron.memory.remember`) lists it, and every configuration operation does not, so a job
+cannot install a module or rotate a secret however it is written. Neither actor can approve
+anything: `core.approval.*` lists `owner` and `member` only.
 
 ## Request lifecycle
 
@@ -146,9 +159,9 @@ The core knows no record type of its own beyond those tables. It has no `party`,
 
 | Module | Owns | Depends on |
 | --- | --- | --- |
-| `relationships` | Party, contact point, affiliation, merge record (R4) | core only |
-| `recallatron` | Memory, memory entity, memory link, retrieval index, retention policy | core only |
-| `leads` | Intake connection, field mapping, routing rule, funnel, campaign, delivery receipt, observation, opportunity, opportunity field state, pipeline preset and pipeline, qualification, handoff, contact permission record | core, `relationships` (required) |
+| `relationships` | Party, contact point, affiliation, merge record and its items, review candidate (R4; [relationships](relationships.md)) | core only |
+| `recallatron` | Memory, memory entity, mention, link, embedding, retention policy, migration batch ([memory](memory.md)) | core only; `leads` and `relationships` optional |
+| `leads` | Intake connection, field mapping, routing rule, funnel, campaign, delivery receipt, payload, conflict, observation, import batch ([intake](intake-and-events.md)); opportunity, its party and observation links, field state, pipeline preset and pipeline, qualification, draft, handoff and snapshot ([opportunity records](confirmation-and-safety.md#opportunities-parties-qualifications-and-handoffs)); contact permission record | core, `relationships` (required), `recallatron` (optional) |
 
 `leads` requires `relationships`; `relationships` requires nothing (FR 40, criterion 54).
 `recallatron` links to Leads records by reference and declares Leads an optional dependency, which
@@ -199,13 +212,25 @@ that is why host-installed package availability is an operator decision.
 
 ## Known tensions
 
-Recorded here so a reader does not mistake them for oversights. Each has a fuller note in the run
-record's technical risks.
+Recorded here so a reader does not mistake them for oversights.
 
 - The web session holds one active workspace at a time; two workspaces in two tabs of one browser
   is not a release-one capability. It follows from criterion 6's literal reading and is the
   simplest correct model; the hosted edition or a later release may add a workspace path segment
   with the same server-side check.
+- `ClaudeCliRuntime` reports `isolation = advisory`, so a workflow that requires enforced
+  isolation is refused on it until an operator-provided sandbox exists. That is honest rather
+  than convenient, and a builder expecting the CLI to be the everything-runtime will meet it in
+  criterion 15's test.
+- FR 12's precedence and floor are untested by any release-one acceptance criterion. The
+  write-time refusal and read-time clamp are unit-tested in phase one
+  ([storage](storage-and-workspaces.md#a5-configuration-precedence-and-the-policy-floor-fr-12));
+  the maintainer may want an acceptance criterion added when phase one is planned in detail.
+- The purpose vocabulary is a closed enum until the framework-proof phase
+  ([contact permission](intake-and-events.md#contact-permission-records-fr-46)).
+- `CREATE EXTENSION` needs a permitted database role; the remedy is a template database
+  ([storage](storage-and-workspaces.md#provisioning)). The migration orchestrator is the only
+  entry point for Alembic ([storage](storage-and-workspaces.md#migrations)).
 - The reference deployment's module subdomains give the interface several origins. The
   [session grant](identity-and-topology.md#sessions-and-cookies) handles it; single-host path mode
   never exercises it, which is why both modes are a CI gate (criterion 22).

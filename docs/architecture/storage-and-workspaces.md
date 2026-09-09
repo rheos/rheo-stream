@@ -57,11 +57,11 @@ schema.
 | `membership` | `account_id`, `workspace_id`, `role text`, `created_at` | Primary key `(account_id, workspace_id)`. `role` is `owner` or `member` (R1, FR 5). |
 | `session` | `id uuid`, `account_id`, `active_workspace_id uuid null`, `created_at`, `last_seen_at`, `expires_at`, `revoked_at null` | The web session. Its active workspace is the only source of "which workspace" for web requests. |
 | `session_grant` | `code_hash bytea`, `session_id`, `target_host text`, `expires_at`, `used_at null` | The one-time cross-host exchange in subdomain mode ([identity](identity-and-topology.md#sessions-and-cookies)). |
-| `access_token` | `id uuid`, `token_hash bytea`, `account_id`, `workspace_id`, `kind text`, `operation_set_id`, `issued_from text`, `created_at`, `expires_at`, `revoked_at null`, `last_used_at null` | CLI and MCP tokens (FR 4). `kind` is `cli` or `mcp`; `issued_from` is `session`, `operator`, or `runtime` (the run-scoped token a runtime adapter issues for one run). |
+| `access_token` | `id uuid`, `token_hash bytea`, `account_id`, `workspace_id`, `kind text`, `operation_set_id`, `issued_from text`, `purpose text null`, `created_at`, `expires_at`, `revoked_at null`, `last_used_at null` | CLI and MCP tokens (FR 4). `kind` is `cli` or `mcp`; `issued_from` is `session`, `operator`, or `runtime` (the run-scoped token a runtime adapter issues for one run). `purpose` is set on a run-scoped token from the run's purpose and is null on a person's token; the MCP facade renders tool outputs under it ([facade](runtime-and-mcp.md#the-mcp-facade)). |
 | `operation_set` | `id uuid`, `name text`, `workspace_id null` | A named set of permitted operations. Package-defined sets have null workspace. |
 | `operation_set_entry` | `operation_set_id`, `operation_name text` | One row per permitted operation. |
 | `identity_provider` | `provider_id text`, `enabled boolean`, `client_id text`, `client_secret_ref text` | Deployment-level provider configuration; the secret is a reference, never a value. |
-| `cluster` | `cluster_ref text`, `dsn_secret_ref text`, `state text` | Release one has exactly one row. The DSN is a secret reference. |
+| `cluster` | `cluster_ref text`, `dsn_secret_ref text`, `state text` | Release one has exactly one row, written at first start from `storage.cluster_dsn_ref`, and every workspace names it. The table rather than a setting exists for phase eight, where a second row is how a workspace lands on a second cluster ([later phases](later-phases.md#phase-8-the-hosted-edition)); release one reads it and never adds to it. The DSN is a secret reference. |
 
 The control plane is small on purpose. Anything that could live in a workspace database does.
 
@@ -89,7 +89,9 @@ and the core routes ([overview](overview.md#processes)).
 
 ## Provisioning
 
-`core.workspace.create` is an operator- or owner-level operation that:
+`core.workspace.create`, callable by the operator and by any account when
+`identity.allow_workspace_create` permits, with the creator written as the workspace's owner
+([first run](identity-and-topology.md#first-run-and-who-may-sign-up)):
 
 1. Inserts the `workspace` row in state `provisioning` with the derived `database_name`.
 2. Runs `CREATE DATABASE <database_name>` on the cluster. If the database already exists and the
@@ -109,6 +111,16 @@ command `rheo workspace repair` can finish. No caller other than these two opera
 Deletion of a whole workspace is not a release-one operation (R5 is record-level). The registry
 state `unavailable` with a detail exists so that a workspace whose database is unreachable is
 visible rather than silently absent.
+
+**Extensions and the application role.** Module install runs `CREATE EXTENSION IF NOT EXISTS`
+for each extension the manifest requires ([module contract](module-contract.md#install-and-enable-release-one-in-code)),
+which needs the application's database role to be allowed to create extensions in the workspace
+database. Some managed Postgres images restrict that to a superuser. The install then fails
+naming the extension, and the operator's remedy is a **template database**: create
+`rheo_template` with the extensions installed, and set `storage.template_database` (deployment
+setting, default `template1`) so provisioning runs `CREATE DATABASE ... TEMPLATE rheo_template`
+and every workspace inherits them. `rheo doctor` reports whether the role may create each
+extension the loaded modules need. This is documented operator work, not automated.
 
 ## Inside a workspace database
 
@@ -136,8 +148,8 @@ this is the inventory.
 | --- | --- |
 | `workspace_composition`, `module_state`, `module_schema_version` | this document, [composition](#composition-and-schema-versions-fr-9) |
 | `workspace_setting`, `member_setting`, `member_credential` | this document, [configuration](#a5-configuration-precedence-and-the-policy-floor-fr-12) |
-| `outbox_event`, `event_delivery`, `consumer_processed`, `job`, `schedule`, `operation`, `audit_record` | [intake and events](intake-and-events.md) |
-| `approval`, `standing_grant`, `standing_grant_operation`, `external_action` | [confirmation and safety](confirmation-and-safety.md) |
+| `outbox_event`, `event_delivery`, `consumer_processed`, `job`, `schedule`, `operation`, `audit_record`, `idempotency_result` | [intake and events](intake-and-events.md) |
+| `approval`, `approval_payload`, `standing_grant`, `external_action` | [confirmation and safety](confirmation-and-safety.md) |
 | `runtime_request`, `runtime_session`, `runtime_transcript` | [runtime and MCP](runtime-and-mcp.md) |
 | `deletion_record`, `export_record`, `export_record_ref`, `migration_verification` | [deletion, export, migration](deletion-export-migration.md) |
 
@@ -158,8 +170,13 @@ an implementation detail nobody reads for product purposes.
 
 Tooling: Alembic, one migration environment per package (the core and each module), each with its
 own version table named `alembic_version_<module>` inside that module's schema. The manifest names
-the module's migration directory ([module contract](module-contract.md#the-manifest)). The core's
-migration orchestrator, not Alembic's CLI, runs them:
+the module's migration directory ([module contract](module-contract.md#the-manifest)). **The
+core's migration orchestrator is the only entry point.** Alembic's own command is not installed
+as a console script in the image, the migration environments read their database URL from the
+orchestrator and refuse to run without it, and `rheo migrate` is the operator's command. Running
+Alembic directly against one database would leave that database's version tables ahead of the
+registry's record and the workspace would be refused as `schema_ahead` at the next start; the
+rule exists so that cannot happen by habit. The orchestrator:
 
 - **Per workspace, under a lock.** `pg_advisory_lock` keyed on the workspace database for the
   duration of that database's migration, so two core replicas or a replica and the operator
@@ -209,7 +226,8 @@ future SQLite adapter has a contract to fail against rather than a vague promise
 
 ## Retrieval adapter (D9, FR 30)
 
-Owned by the memory module but shaped by the core's seam rules. One protocol:
+Owned by the memory module ([memory](memory.md), which owns the records this indexes) but shaped
+by the core's seam rules. One protocol:
 
 ```text
 RetrievalStrategy
@@ -226,10 +244,13 @@ Three implementations ship, selected by `recallatron.retrieval.strategy`:
 | `dense` | `recallatron.memory_embedding(memory_id, model_id text, dimensions integer, vector vector)` with an HNSW index, cosine distance | Requires the pgvector extension and an embedding provider. |
 | `hybrid` | both | Reciprocal rank fusion of the two lists (constant 60), then a bounded rerank by recency within ties. |
 
-Permission and purpose filtering happens **before** ranking, inside `search`: the candidate set
-is the caller's readable, purpose-permitted records (FR 27), and only those are scored. Criterion
-31 runs the module's behavioural suite against `lexical` and `dense` in turn. The embedding
-provider sits behind the same provider seam the runtime uses ([runtime](runtime-and-mcp.md#the-embedding-provider))
+Filtering by audience, purpose, and state happens in SQL **before** ranking, inside `search`:
+only memories the caller's audience covers, that carry the request's purpose, and that are live
+are scored (FR 27). The per-link record permission and contact-permission checks then run on the
+ranked slice before anything is returned, and can only remove hits
+([memory retrieval](memory.md#retrieval-fr-27-fr-30-criteria-27-and-31)). Criterion 31 runs the
+module's behavioural suite against `lexical` and `dense` in turn. The embedding provider sits
+behind the same provider seam the runtime uses ([runtime](runtime-and-mcp.md#the-embedding-provider))
 and its inputs go through the [redaction contract](runtime-and-mcp.md#the-redaction-contract).
 
 ## The data root (FR 10)
@@ -367,10 +388,12 @@ every connection `needs_credential` and every member credential `needs_value` un
 the file store is the volume's job in release one; per-workspace keys and key management are the
 hosted edition's prerequisite, as the build plan already records.
 
-**Rotation.** A secret id can hold `current` and `previous` files; a component that supports
-overlap (the webhook receiver does, see [intake](intake-and-events.md#transports))
-tries both until `previous` is removed. Removal is immediate refusal, which is what criterion 42
-tests.
+**Rotation** is not a store feature. A secret id holds one value; rotating means writing a new
+value under a new id and having the referencing record name both, which is how the intake
+connection's `signing_secret_ref`, `previous_secret_ref`, and `previous_valid_until` carry the
+overlap window criterion 42 needs ([intake transports](intake-and-events.md#transports)). The
+store has no notion of current and previous, so there is one rotation mechanism and it lives with
+the record that owns the reference.
 
 ## Storage decision record (D1, D2)
 

@@ -12,31 +12,44 @@ idea-document question 13 for release one.
 
 `core.record.delete(ref)`, destructive class, per-action confirmation, no standing grant. Any
 module can call it for a record type whose manifest marks `deletable = true`; release one has
-three: `leads.observation`, `relationships.party`, `leads.opportunity`. The memory module's
-`recallatron_forget` is the same coordinator invoked for `recallatron.memory`.
+four: the three R5 types (`leads.observation`, `relationships.party`, `leads.opportunity`) and
+`recallatron.memory`, whose `recallatron_forget` tool is this same coordinator. Who may call it
+per type is the manifest's `delete_roles` ([module contract](module-contract.md#operations-tools-events)).
 
 ### The cascade
 
 The coordinator runs the whole cascade in **one transaction** against the workspace database,
 which the one-database-per-workspace layout makes possible without a distributed step. Order:
 
-1. **Guards.** The approval is rechecked (window, actor); the record must still exist at the
-   approved revision.
+1. **Guards.** The approval is rechecked (window, both actors); the record must still exist at
+   the approved revision.
 2. **Owning module.** The owner's registered `delete(ref)` removes the record and every row it
-   owns for that record (an observation's fields and payload; an opportunity's field state,
-   qualifications, and handoff rows; a party's contact points and affiliations).
+   owns for that record (an observation's fields and payload, its `opportunity_observation`
+   rows, and the `opportunity_field_state` rows that name it as their evidence, so no value whose
+   only evidence was the erased observation stays on an opportunity; an opportunity's field
+   state, observation links, party links, qualifications, drafts, handoffs and snapshots; a
+   party's contact points and affiliations; a memory's embeddings, links, and mentions) and
+   returns the set of references it removed. That set is normally the one reference; a party that is a merge
+   survivor also returns its alias rows, which it removes with it
+   ([relationships](relationships.md#deletion-r5)). Steps 3 to 6 run once per reference in the set.
 3. **Deletion participants.** Every module enabled in the workspace that declared a
    `DeletionParticipant` for the type runs its handler in the same transaction:
-   - `recallatron.on_record_deleted`: invalidate memories derived from the reference, remove
-     their embeddings and lexical index entries, mark summaries superseded (FR 28, criterion 29).
-   - `leads.on_party_deleted`: null `observation.party_ref` for every observation that referenced
-     the party, so they remain as unlinked evidence (R5); mark opportunities' party links
-     removed.
-   - `leads.on_observation_deleted`: keep the `delivery_receipt` row; delete only its
-     `delivery_payload`; set the receipt's `state_detail = observation_deleted`.
+   - `recallatron.on_record_deleted`: run the memory module's one invalidation rule with reason
+     `source_deleted`, which removes every memory linked to the reference and every memory
+     derived from those, with their embeddings and index entries
+     ([memory](memory.md#correction-and-supersession-fr-28-criterion-29); FR 28, criterion 29).
+   - `leads.on_party_deleted`: null `observation.party_ref` for every observation that named the
+     reference, so they remain as unlinked evidence (R5); set `opportunity_party.removed_at`
+     for every link that named it.
+   - `leads.on_observation_deleted`: keep the `delivery_receipt` row; delete its
+     `delivery_payload`; null `body` and `body_retention_until` on every `delivery_conflict`
+     row of that receipt; set the receipt's `state_detail = observation_deleted`.
 4. **Core participants.** Queued jobs and pending external actions with
    `depends_on_ref = ref` (or whose destination is the deleted party) are set `cancelled`
-   (criterion 65). Approvals bound to the reference go `invalidated`.
+   (criterion 65). Approvals bound to the reference go `invalidated` and their
+   `approval_payload` rows are deleted. Outbox rows are not touched, because event `data` never
+   carries personal content ([events](intake-and-events.md#events-and-the-outbox-fr-15)); only
+   references, which now resolve to `deleted`.
 5. **Held exports.** Every `export_record` whose `export_record_ref` rows include the reference is
    marked `state = removed_by_deletion` with `removed_at` and the deletion record id.
 6. **Deletion record.** `core.deletion_record` is written.
@@ -55,7 +68,7 @@ shared credentials, or to unrelated records (idea document).
 | --- | --- |
 | `id uuid`, `deleted_at` | |
 | `record_type text`, `record_id uuid` | What, by identifier only. |
-| `actor_kind`, `actor_id`, `approval_id` | Who, and the confirmation. |
+| `actor_kind`, `actor_id`, `approval_id uuid null` | Who, and the confirmation. `approval_id` is null only when `actor_kind = system` and the deletion is the memory retention sweep, which is R5's one permitted scheduled expiry ([memory](memory.md#retention-fr-29-criterion-30)). |
 | `participants text[]` | Which participants ran. |
 | `cancelled_job_count integer`, `cancelled_action_count integer`, `removed_export_count integer`, `invalidated_memory_count integer` | Counts only. |
 
@@ -73,12 +86,16 @@ two confirmations, and neither operation calls the other (FR 46, R5).
 
 ### Receipts and re-delivery
 
-The receipt outlives the observation with `source_event_id`, `content_digest`, `received_at`,
-`source_occurred_at`, and no payload. A later delivery with the same identifier hits the unique
-index; the intake path finds the receipt's `state_detail = observation_deleted` and records a
-`delivery_conflict` whatever the digest, so the observation is never recreated and the conflict is
-visible on the connection (criterion 65). Only an operator command that deletes the *receipt* would
-allow the event to be accepted again, and release one ships no such command.
+The receipt outlives the observation with `source_event_id`, `content_digest`, `byte_length`,
+`received_at`, `source_occurred_at`, and no payload. A later delivery with the same identifier
+hits the unique index; the intake path finds the receipt's `state_detail = observation_deleted`
+and records a `delivery_conflict` of `kind = deleted_observation` whatever the digest, holding
+the new delivery's digest, byte length, and receipt time and **no body**, so the observation is
+never recreated, the erased person's payload never lands again, and the conflict is visible on
+the connection (criterion 65, FR 51). A `digest_differs` conflict recorded before the deletion
+had its body nulled by the cascade, so after deletion no row under that receipt holds a payload.
+Only an operator command that deletes the *receipt* would allow the event to be accepted again,
+and release one ships no such command.
 
 ## Export and restore (FR 52)
 
@@ -111,7 +128,7 @@ construction: no exporter can resolve one.
 
 | Table | Columns |
 | --- | --- |
-| `core.export_record` | `id uuid`, `artifact_path`, `created_at`, `created_by_id`, `state` (`in_progress`, `complete`, `failed`, `removed_by_deletion`), `removed_at null`, `deletion_record_id null`, `byte_length` |
+| `core.export_record` | `id uuid`, `kind` (`export`, `restore`), `artifact_path null`, `source_digest bytea null`, `created_at`, `created_by_id`, `state` (`in_progress`, `complete`, `failed`, `removed_by_deletion`), `removed_at null`, `deletion_record_id null`, `byte_length null`. A `restore` row records the digest of the artifact restored from and holds no path; the reference index below is written only for `export` rows. |
 | `core.export_record_ref` | `export_id`, `record_ref` for every record of a deletable type in the artifact |
 
 The reference index exists for one reason: criterion 65's "the export artifact is gone from the
@@ -137,7 +154,7 @@ owner into a workspace the control plane does not yet know:
    `approval_id` pointing at an approval that is not `approved`, so it cannot execute until a
    person approves again (criterion 21). Every connection lands `needs_credential`; every member
    credential `needs_value`.
-6. Set the workspace `active`; write an `export_record`-style `restore_record` with the source
+6. Set the workspace `active`; write an `export_record` of `kind = restore` with the source
    artifact's digest.
 
 The comparison the criteria require is a supported operation, `core.workspace.digest`, that

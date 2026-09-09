@@ -19,7 +19,7 @@ to tables that live and die in one database; these do not.
 | --- | --- | --- | --- |
 | Durable record identifier | UUID version 7 (RFC 9562), stored as Postgres `uuid` | The service that creates the record, inside the creating transaction | Time-ordered, so primary-key indexes stay append-mostly. 16 bytes in every foreign key. |
 | Event identifier | UUID version 7 | The outbox writer | One per outbox row. Distinct from the source event identifier below. |
-| Operation, approval, receipt, job, session, token identifiers | UUID version 7 | The core | Same type everywhere, so a caller cannot tell a workspace record from a control-plane record by shape, and neither leaks routing. |
+| Operation, approval, job, session, token identifiers | UUID version 7 | The core | Same type everywhere, so a caller cannot tell a workspace record from a control-plane record by shape, and neither leaks routing. |
 | Source event identifier | Opaque text, at most 512 bytes | The external source, or the transport connector when the source supplies none | Unique only within `(connection, source_event_id)`. Never a UUID by contract; never used as a primary key. |
 | Configuration identifier | Slug `[a-z][a-z0-9_]{0,31}` | A person or a package author | Module ids, record type names, stage ids, field names, mapping ids, operation-set names. Human-chosen, immutable once referenced. |
 | Workspace slug | Slug, unique in the control plane | The workspace creator | Display and switcher label only. Never used for storage routing; the UUID is. |
@@ -52,7 +52,8 @@ core.operation:018f6b2f-0000-7000-8000-000000000002
 Rules:
 
 - The module segment is the owning module's id; `core` is reserved for core-owned records
-  (operations, approvals, receipts are Leads-owned, so they are `leads.receipt`, not core).
+  (operations, approvals). A delivery receipt is Leads-owned, so its reference is
+  `leads.delivery_receipt:<uuid>`, not `core.`.
 - The record type is declared in the owning module's manifest
   ([module contract](module-contract.md#owned-record-types)). A reference whose type no manifest
   declares fails validation.
@@ -88,6 +89,12 @@ never existed, because the lookup runs against the caller's own database and the
 there. Deleted records resolve to `state = deleted` from the deletion record
 ([deletion](deletion-export-migration.md)) so that references in audit and event history stay
 identifiable, as the idea document requires for detached modules too.
+
+A module's resolver may resolve an **alias**: the relationships module resolves a merged party
+by following `merged_into_id` exactly once and returns the survivor's display with
+`state = live`, so a reference written before a merge keeps resolving after it
+([relationships](relationships.md#merge-and-unmerge-r4-criterion-53)). The core knows nothing of
+aliases; a module that wants "the canonical reference" offers a read operation for it.
 
 ## Namespaces in one place
 

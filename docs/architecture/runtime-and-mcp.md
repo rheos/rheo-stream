@@ -113,13 +113,14 @@ and uses that program's own agent loop.
 | Executable | `runtime.claude_cli.executable`, a deployment setting (absolute path); never from a workspace setting or a request. Missing or non-executable at spawn is `executable_unavailable`. |
 | Arguments | A fixed list: `-p`, `--output-format stream-json`, `--verbose`, `--max-turns <max_iterations>`, `--mcp-config <generated file>`, `--allowedTools <permitted tool names>`, `--resume <native_handle>` when continuing. No argument is built from task text. |
 | Task input | Written to the child's stdin as data. |
-| Tools | The adapter writes a per-run MCP configuration file pointing at this deployment's MCP endpoint with a **run-scoped token**: an `access_token` of kind `mcp`, `issued_from = runtime`, whose operation set is exactly `permitted_tools`, valid for the run's deadline, revoked at run end. The permitted set is therefore enforced by the facade on every call, not only by the CLI's allow list. |
+| Tools | The adapter writes a per-run MCP configuration file pointing at this deployment's MCP endpoint with a **run-scoped token**: an `access_token` of kind `mcp`, `issued_from = runtime`, whose operation set is exactly `permitted_tools`, whose `purpose` is the run's, valid for the run's deadline, revoked at run end. The permitted set is therefore enforced by the facade on every call, not only by the CLI's allow list, and tool outputs are redacted under the run's purpose. |
 | Working directory | `<data_root>/workspaces/<id>/runs/<operation_id>/`, created empty, removed after the run. The parent development workspace is never the working directory. |
-| Environment | An allowlist: locale, path, home, and the variables the executable needs for its own credential; the model credential comes from the `credential_slot` mapping in the adapter's private configuration, resolved through the adapter's secret scope, and is passed in the child environment only. |
+| Configuration directory | `<data_root>/workspaces/<id>/runtime/claude-cli/`, passed as the executable's configuration-directory variable (`CLAUDE_CONFIG_DIR`) and as `HOME`, so that everything the executable writes by convention (its session files among them) lands under the data root and nowhere else. It is per workspace, not per run, because `continuation` resumes a native session from a later operation; a per-run directory would lose it. The retention sweep removes files in it older than `runtime.transcript_retention_days`. |
+| Environment | An allowlist: locale, path, the two directory variables above, and the variables the executable needs for its own credential; the model credential comes from the `credential_slot` mapping in the adapter's private configuration, resolved through the adapter's secret scope, and is passed in the child environment only. |
 | Isolation | Reports `advisory` in release one: the adapter constrains the working directory and the tool allow list but cannot enforce a filesystem or network sandbox on its own. Workflows requiring `enforced` are refused on it until an operator-provided sandbox is configured. |
 | Deadline | A timer kills the process group at `deadline_seconds`; `deadline_exceeded`. |
 | Stream parsing | One JSON object per line. A process exit with no terminal `result` object is `stream_truncated`. An authentication error object is `credential_invalid`. A tool refusal from the facade surfaces as `tool_result(refused)` and, if the run cannot proceed, `tool_denied`. |
-| Continuation | The `session_id` in the stream is stored as `native_handle`; resumed only through the bound lookup. |
+| Continuation | The `session_id` in the stream is stored as `native_handle`; resumed only through the bound lookup. The phase-one runtime test starts a run, ends it, and resumes it from a second operation with `continuation`, which is what proves the per-workspace configuration directory carries the native session across runs. |
 | Usage | Reported as `exact` when the result object carries it. |
 
 The adapter never opens a database, never sees a `WorkspaceContext`, and never sees a secret
@@ -166,9 +167,13 @@ listed before a revocation is refused after it (idea document: discovery grants 
   (criterion 6). Record references are strings in the documented form; a reference from another
   workspace resolves to nothing and the call fails `not_found`.
 - Class: declared on the tool and required to equal the operation's ([module contract](module-contract.md#operations-tools-events)).
-- Output: the operation's output model. A destructive, external, or financial call without an
-  approval returns `approval_required` with the approval id and the operation id, distinct from
-  success and from error (criterion 19).
+- Output: the operation's output model, rendered by the facade through the owning module's
+  `render_for_model` under the [redaction tiers](#tiers) with the token's `purpose`
+  (`internal_analysis` when the token carries none), so a tool never returns a `restricted`
+  field, a contact value, or a secret reference to a model, whatever the operation returns to a
+  person. A destructive, external, or financial call without an approval returns
+  `approval_required` with the approval id and the operation id, distinct from success and from
+  error (criterion 19).
 - Long-running operations return `{ operation_id, state }` and the caller polls `operations_get`.
 
 **No SQL, no repository.** A tool has no handler; `apps/mcp` imports the service registry and the
@@ -180,17 +185,29 @@ proposed. Approval happens in the web interface or through a `cli` token in a pe
 (R3 item 8). A tool may *request* an approval on behalf of the actor, which is what
 `approval_required` is.
 
-**Release-one tool set.** Illustrative names follow the idea document; the set is the manifests'
-to define.
+**Release-one tool set.** Each names one operation and restates its class and roles; the
+operation tables in the module documents are authoritative.
 
-| Phase | Tools |
-| --- | --- |
-| One (core) | `workspace_status` (read), `operations_get` (read), `operations_list` (read), `audit_list` (read, owner) |
-| Two (memory) | `recallatron_recall` (read), `recallatron_remember` (mutate), `recallatron_correct` (mutate), `recallatron_forget` (destructive) |
-| Three (relationships, leads) | `relationships_find_party` (read), `relationships_get_party` (read), `relationships_merge_parties` (mutate), `relationships_unmerge` (mutate); `leads_search`, `leads_list`, `leads_get` (read), `leads_capture` (mutate), `leads_qualify` (mutate), `leads_transition` (mutate), `leads_prepare_followup` (draft), `leads_handoff` (external; returns `unavailable` with no destination, criterion 64), `leads_delete` (destructive) |
+| Phase | Tool | Class | Roles |
+| --- | --- | --- | --- |
+| One (core) | `workspace_status`, `operations_get`, `operations_list` | read | owner, member |
+| One (core) | `audit_list` | read | owner |
+| Two (memory) | `recallatron_recall` | read | owner, member |
+| Two (memory) | `recallatron_remember`, `recallatron_derive`, `recallatron_correct`, `recallatron_supersede` | mutate | owner, member |
+| Two (memory) | `recallatron_forget` | destructive | owner, member |
+| Three (relationships) | `relationships_find_party`, `relationships_get_party`, `relationships_list_review` | read | owner, member |
+| Three (relationships) | `relationships_merge_parties`, `relationships_unmerge`, `relationships_resolve_review` | mutate | owner, member |
+| Three (relationships) | `relationships_delete_party` | destructive | owner |
+| Three (leads) | `leads_search`, `leads_list`, `leads_get`, `leads_get_handoff` | read | owner, member |
+| Three (leads) | `leads_connection_health` | read | owner |
+| Three (leads) | `leads_capture`, `leads_update`, `leads_qualify`, `leads_transition` | mutate | owner, member |
+| Three (leads) | `leads_handoff` | mutate; writes the handoff record and returns `unavailable` with no destination (criterion 64) | owner, member |
+| Three (leads) | `leads_prepare_followup` | draft | owner, member |
+| Three (leads) | `leads_delete` | destructive | owner |
 
-The recording sink and the destructive fixture are test-harness registrations, never in the
-production set (criterion 18).
+No tool in the production set is external or financial class. The recording sink and the
+destructive fixture are test-harness registrations, never in the production set (criterion 18);
+the sink is release one's only external-class operation anywhere.
 
 ## The redaction contract
 
@@ -214,24 +231,27 @@ one. The tier for secrets exists so that a *reference* string in a record is als
 ### The context builder
 
 `core.runtime.build_context(ctx, purpose, refs)`: resolve each reference under `ctx`, drop those
-not readable, drop memory items whose purposes do not include `purpose` (FR 27), render each
-readable record through its module's `render_for_model(record, tier_policy)` which omits fields
-above the allowed tier, and cap total bytes at `runtime.max_context_bytes` (package default
-200000, floor `min`). Restricted values
-that appear inside free text (an email address inside a message body) are masked by pattern
-before sending unless the `respond` allowance is on. Derived memories carry the intersection of
-their sources' audiences and purposes, so the filter on a memory is never looser than on what it
-was made from (criterion 28).
+not readable, obtain memory items only through `recallatron.memory.recall` with the same
+`purpose` (which applies the audience, purpose, link, and contact-permission filters,
+[memory](memory.md#retrieval-fr-27-fr-30-criteria-27-and-31); FR 27), render each readable
+record through its module's `render_for_model(record, tier_policy)` which omits fields above the
+allowed tier, and cap total bytes at `runtime.max_context_bytes` (package default 200000, floor
+`min`). Restricted values that appear inside free text (an email address inside a message body)
+are masked by pattern before sending unless the `respond` allowance is on. Derived memories carry
+the intersection of their sources' audiences and purposes, so the filter on a memory is never
+looser than on what it was made from (criterion 28).
 
 ### Retention and control
 
-- The core stores context references and a digest, and transcripts for the retention period;
-  neither the provider's copy nor the CLI's local session files are under the deployment's
-  control, and the documentation says so rather than claiming otherwise.
+- The core stores context references and a digest, and transcripts for the retention period.
+  The provider's copy is outside the deployment's control, and the documentation says so rather
+  than claiming otherwise. The CLI's local files are directed under the data root by the
+  per-workspace configuration directory and swept with the transcripts; the contract claims only
+  that the deployment removes what it can see, and the phase-one runtime test (a run resumed
+  from a second operation) is where a builder verifies the executable writes nowhere else
+  before the claim is widened.
 - The workspace owner controls the internal-purpose list and the contact-point allowance within
   the operator's floor, the runtime and model allow lists within the operator's, and transcript
   retention within the operator's maximum.
 - A record type can be marked `never_to_model` at the workspace level per module
   (`<module>.redaction.exclude_types`), which the builder honours before tiering.
-- `ClaudeCliRuntime` writes its own session files under the run's working directory, which is
-  removed at run end, so no transcript accumulates outside the deployment's retention.

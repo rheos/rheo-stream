@@ -10,7 +10,9 @@ says.
 **What it adds.** A capability bundle, not a module: pipeline presets for job search, extension
 fields under `ext.jobsearch.*` (candidate fit, application questions), job-source connectors, the
 multi-observation enrichment where an email alert, a copied search result, and a full posting
-converge on one opportunity, and the proposal drafting and answer-library screens.
+converge on one opportunity, and the proposal drafting and answer-library screens. The
+`proposal` template kind joins `preset_template` here, in a Leads migration; release one carries
+`followup` only.
 
 **How it fits.** Every job-shaped field is a `preset_field` with `ext.jobsearch.` targets, so the
 Leads core gains no column (FR 44). Connectors implement the same `Delivery` contract as the three
@@ -33,12 +35,18 @@ dependencies, commitments. Ported from the predecessor's Next.js screens and mov
 SQLite file to the `current` schema of the workspace database.
 
 **How it fits.** A manifest like the others; `current` requires nothing and `leads` declares it
-optional. The handoff operation from phase three gains its first destination: a `DestinationGuard`
-and an `EXTERNAL`-class execution that calls `current.work.create_from_handoff(handoff_id,
-snapshot)` with `KEYED` idempotency on the handoff id, so a retry after a lost response returns
-the created work rather than creating a second. Leads stores the returned reference and displays
-the work's state through the record resolver, never a second editable copy. Completing a task
-publishes `current.task.completed`, which no other module may treat as a domain outcome.
+optional. The handoff operation from phase three
+([handoffs](confirmation-and-safety.md#the-handoff-operation-fr-45-criterion-64)) gains its first
+registered destination: `leads.handoff.request` writes the record `pending` instead of
+`unavailable` and calls `current.work.create_from_handoff(handoff_ref, snapshot)`, the
+`EXTERNAL`-class execution with its own approval, `DestinationGuard`, and `external_action`
+record, with `KEYED` idempotency on the handoff reference so a retry after a lost response
+returns the created work reference from `core.idempotency_result` rather than creating a second.
+Leads writes the outcome into `handoff.state` and `result_ref` from the operation record and
+displays the work's state through the record resolver, never a second editable copy. If a preset
+then needs to name a destination, a `preset_handoff(preset_id, version, destination_ref)` table
+arrives in the same Leads migration; release one ships neither. Completing a task publishes
+`current.task.completed`, which no other module may treat as a domain outcome.
 
 **What it must not do.** Become invoicing or accounting; those remain the external back-office
 integration's.

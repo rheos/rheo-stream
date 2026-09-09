@@ -1615,7 +1615,7 @@ which records the rationale for each:
   settled. Every other open question below carries a recorded disposition.
 
 Settled by the [architecture specification](../architecture/README.md), as decisions
-A1 to A15 with rationale in the document each names; proposed until the maintainer
+A1 to A17 with rationale in the document each names; proposed until the maintainer
 merges the pull request that carries them:
 
 - The per-workspace storage unit is a database, not a schema; one Postgres schema
@@ -1639,6 +1639,13 @@ merges the pull request that carries them:
   question 11's remainder and question 17.
 - Identity, sessions, tokens, and the URL topology as configuration
   ([identity and topology](../architecture/identity-and-topology.md)).
+- The relationships module's data model, with a merged party kept as an alias so
+  that references are never rewritten and unmerge restores from the merge record
+  ([relationships](../architecture/relationships.md)); this gives R4's reversibility
+  its representation.
+- The memory module's data model, with an explicit audience and purpose set on every
+  memory, intersection on derivation, and one invalidation rule for deletion,
+  correction, and supersession ([memory](../architecture/memory.md)).
 
 ### Recorded changes of direction
 

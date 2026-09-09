@@ -3,16 +3,17 @@
 **Status:** Architecture specification, designed against the accepted
 [requirements and scope](../requirements/requirements-and-scope.md) (D1 to D11, R1 to R5, FR 1 to
 FR 53) and the accepted [build plan](../requirements/build-plan.md). The decisions recorded here as
-A1 to A15 are this specification's own calls, made where the requirements deliberately left the
+A1 to A17 are this specification's own calls, made where the requirements deliberately left the
 design open. They become accepted architecture when the maintainer merges the pull request that
 carries them; until then they are proposed, and they are written as decisions with rationale so
 that a reviewer can reject one on its reasoning rather than on its vagueness.
 
 **Source of truth for what the system must do:** the requirements. This specification never
-reopens a settled decision; where it believes one is wrong it says so under technical risks in the
-run record, not by designing around it.
+reopens a settled decision; where it believes one is worth revisiting it says so under
+[known tensions](overview.md#known-tensions), not by designing around it.
 
-**Depth:** implementable for release one (public phases one to three). One page per later phase.
+**Depth:** implementable for release one (public phases one to three), with every release-one
+table at column level. One page per later phase.
 
 ## Reading order
 
@@ -22,9 +23,11 @@ run record, not by designing around it.
 | [Identifiers](identifiers.md) | UUIDv7 everywhere durable, the record-reference form, permission-checked resolution, and every namespace in one table. |
 | [Storage, workspaces, configuration, and secrets](storage-and-workspaces.md) | Database per workspace (the deferred D1 call), the control plane, server-derived routing, provisioning, schema per module, migrations, the storage and retrieval adapter seams, the data root, configuration precedence with the operator policy floor, the secret store, and the storage decision record. |
 | [Module contract, version 1](module-contract.md) | The manifest, registration, install and enable in code, the full lifecycle on paper, compatibility, and how the boundary is proved by absence. |
-| [Intake, events, durable work, and audit](intake-and-events.md) | The observation envelope, receipts and conflicts, field mapping and routing, field derivation, the three transports, the outbox and event envelope, ordering, retry, replay, jobs and leases, operation records, audit, external actions, and contact permission records. |
-| [Runtime contract, the MCP facade, and the redaction contract](runtime-and-mcp.md) | Request binding, capability discovery, normalized outcomes, native session handles, `ClaudeCliRuntime`, the OpenRouter shape, the MCP facade conventions and release-one tool set, and what reaches a model provider. |
-| [Confirmation, safety classes, and pipeline presets](confirmation-and-safety.md) | The six classes' dispatch behaviour, the approval record and binding, standing grants, execution guards, the test fixtures, and what a pipeline preset can configure and how records migrate. |
+| [Memory](memory.md) | The memory records with provenance, the explicit audience and purpose model and the intersection rule on derivation, retrieval's two stages, correction and supersession under one invalidation rule, retention per kind under the workspace ceiling, and the predecessor migration. |
+| [Relationships](relationships.md) | Party, contact point, affiliation, merge record, and review candidate at column level; the two classes of automatic-match evidence; `resolve_or_create`; alias-based merge and restore-from-record unmerge; how a resolved review reaches Leads. |
+| [Intake, events, durable work, and audit](intake-and-events.md) | The observation envelope, receipts and conflicts, field mapping and routing, field derivation, the three transports and secret rotation, the outbox and event envelope, ordering with the lease query, retry, replay and retention, what event data may carry, jobs and leases, operation records, audit, idempotent results, external actions, and contact permission records. |
+| [Runtime contract, the MCP facade, and the redaction contract](runtime-and-mcp.md) | Request binding, capability discovery, normalized outcomes, native session handles, `ClaudeCliRuntime`, the OpenRouter shape, the MCP facade conventions and release-one tool set with roles, and what reaches a model provider. |
+| [Confirmation, safety classes, pipeline presets, and the opportunity records](confirmation-and-safety.md) | The six classes' dispatch behaviour, the approval record and binding, standing grants, execution guards, the test fixtures, what a pipeline preset can configure and how records migrate, and the opportunity, its parties, qualifications, drafts, and handoffs at column level. |
 | [Deletion, export and restore, and migration verification](deletion-export-migration.md) | The record-level deletion cascade, the content-free deletion record, receipt survival, the export artifact and restore, migration verification, and release-one disaster recovery. |
 | [Identity, sessions, tokens, and URL topology](identity-and-topology.md) | The identity-provider boundary, sessions and the active workspace, CLI and MCP tokens, host-only cookies with the session grant, the routing configuration and table, the reference deployment's hosts, and the hosted-edition constraint. |
 | [Later phases](later-phases.md) | Phases four to eight, one page each. |
@@ -51,6 +54,8 @@ functional requirements (FR) are cited by number throughout; these are the addit
 | A13 | The **redaction contract** is three field tiers declared per record type in the manifest, a purpose-gated context builder, and bounded retention. | [runtime and MCP](runtime-and-mcp.md#the-redaction-contract) |
 | A14 | **Deletion** is a coordinator running the owning module and every registered participant in one transaction, then removing held export artifacts after commit. | [deletion, export, migration](deletion-export-migration.md#the-cascade) |
 | A15 | **Pipeline presets** are versioned copy-on-write; opportunities and qualifications pin a version; migration is an explicit operation with a stage map. | [confirmation and safety](confirmation-and-safety.md#pipeline-presets-and-their-limits) |
+| A16 | A **merged party is an alias**: it keeps its row, references outside the module are never rewritten, the resolver follows one hop, and the merge record holds the pre-merge ownership so unmerge restores from the record. | [relationships](relationships.md#a16-alias-based-merge-decided) |
+| A17 | Every **memory carries an explicit audience and purpose set**; derivation takes the intersection and refuses when empty; one invalidation rule serves deletion, correction, and supersession. | [memory](memory.md#a17-explicit-audience-and-purposes-intersection-one-invalidation-rule) |
 
 ## What this specification does not decide
 

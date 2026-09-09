@@ -60,6 +60,7 @@ RecordType
   name: slug                      # "opportunity"; the reference form is "leads.opportunity"
   table: str                      # "leads.opportunity"; must be in the module's schema
   deletable: bool                 # true for the three R5 types and any type a module chooses
+  delete_roles: set[Role]         # who may call core.record.delete for it; required when deletable
   exportable: bool
   audience_field: str | None      # column holding the record's audience, when records carry one
 ```
@@ -77,26 +78,56 @@ OperationDeclaration
   input: type[BaseModel]                    # may not declare workspace_id, actor_id, tenant, database, schema, connection fields
   output: type[BaseModel]
   handler: Callable[[WorkspaceContext, UnitOfWork, input], output]
-  roles: set[Role]                          # who may call; default {owner, member}
+  roles: set[Role]                          # who may call; Role in {owner, member, operator, service}; default {owner, member}
   idempotency: Idempotency                  # NONE | NATURAL | KEYED(field_name)
   audit: AuditSpec | None                   # required unless safety_class is READ
-  guards: list[ExecutionGuard]              # rechecks run at execution for DESTRUCTIVE, EXTERNAL, FINANCIAL
+  guards: list[ExecutionGuard]              # domain rechecks added to the core's, for DESTRUCTIVE, EXTERNAL, FINANCIAL
   long_running: bool                        # returns an operation id and runs as a job
 ```
+
+`roles` is checked by the dispatcher against `ctx.role` on every call. `service` is the role a
+`connection` actor at `entry = intake` and a `system` actor at `entry = job` carry
+([workspace context](overview.md#the-workspace-context)); an operation that lists it may be
+called from processing and jobs, and one that does not (every configuration operation) cannot.
+The release-one operations and their roles are listed in the document that owns each:
+[relationships](relationships.md#operations-and-roles), [memory](memory.md#operations-and-roles),
+[Leads](confirmation-and-safety.md#operations-and-roles), and the core's below.
+
+| Core operation | Class | Roles |
+| --- | --- | --- |
+| `core.workspace.status`, `core.operation.get`, `.list` | read | owner, member, operator |
+| `core.workspace.create` | mutate, long-running | operator, and any account when `identity.allow_workspace_create` (deployment, default `true`); the creator becomes owner |
+| `core.module.install`, `.enable` | mutate | owner, operator |
+| `core.settings.set` (workspace keys), `core.settings.set_member` (member keys) | mutate | owner; owner, member |
+| `core.token.issue` (for the calling account), `.revoke` | mutate | owner, member (a token never exceeds its account's role); operator for another account |
+| `core.approval.approve`, `.refuse` | mutate | owner, member, through `web` or a `cli` token only |
+| `core.standing_grant.create`, `.revoke` | mutate | owner |
+| `core.audit.list`, `core.work.failures` | read | owner, operator |
+| `core.work.retry`, `.skip`, `.replay`, `core.operation.resolve` | mutate | owner, operator |
+| `core.workspace.export`, `.digest` | mutate, long-running; read | owner, operator |
+| `core.workspace.restore` | mutate, long-running | operator, or an account restoring into a workspace the control plane does not yet know |
+| `core.record.delete` | destructive | the record type's `delete_roles`: owner for `leads.observation`, `leads.opportunity`, `relationships.party`; owner, member for `recallatron.memory` |
 
 Registration rules the core enforces at startup (criterion 18, criterion 14, criterion 6):
 
 - No `safety_class`: refused, naming the operation.
 - Class above `READ` with `audit = None`: refused, naming the operation.
-- Class in `DESTRUCTIVE`, `EXTERNAL`, `FINANCIAL` with no `guards`: refused. The core supplies
-  `ActorPermissionGuard` and every module in that class adds the domain guards it needs
-  ([confirmation](confirmation-and-safety.md#execution-guards)).
+- Class in `DESTRUCTIVE`, `EXTERNAL`, `FINANCIAL`: the core attaches `ActorPermissionGuard`,
+  `WindowGuard`, and, when the input names a `subject_ref`, `RecordStateGuard`; the module's
+  `guards` list adds domain guards and may be empty
+  ([confirmation](confirmation-and-safety.md#execution-guards)). There is no "no guards" refusal,
+  because the core's guards make that state unreachable.
 - An input model with a reserved field name (`workspace_id`, `workspace`, `actor_id`, `actor`,
   `tenant_id`, `database`, `schema`, `connection_string`, `dsn`, `sql`, `table_name`,
   `statement`): refused. The last three make criterion 20's "accepts no SQL, table name, or query
-  fragment" a mechanical check over the registered input models.
-- `KEYED` idempotency names a field of the input model; the core stores
-  `(operation_name, key)` in `core.audit_record` and returns the recorded output on a repeat.
+  fragment" a mechanical check over the registered input models. The one workspace-taking
+  endpoint, the session's active-workspace switch, is not a registered operation
+  ([identity](identity-and-topology.md#accounts-sessions-and-the-active-workspace)).
+- `KEYED` idempotency names a field of the input model; the core stores the serialised output in
+  `core.idempotency_result` and returns it on a repeat
+  ([idempotent results](intake-and-events.md#idempotent-results)).
+- A tool registered by a module may name a core operation (the deletion tools do) only when its
+  input restricts the reference to the module's own record types.
 
 ```text
 ToolDeclaration
@@ -182,7 +213,9 @@ Per workspace, in `core.module_state.state`:
 2. Dependencies must be installed in this workspace at a satisfying version; optional ones may be
    absent and are recorded as absent.
 3. `required_extensions` are created in the workspace database (`CREATE EXTENSION IF NOT
-   EXISTS`); failure names the extension and stops before any migration.
+   EXISTS`); failure names the extension and stops before any migration. When the application
+   role may not create extensions, the operator pre-creates a template database that carries
+   them ([storage](storage-and-workspaces.md#provisioning)).
 4. The module's schema is created and its migration chain applied under the workspace's advisory
    lock; each applied step writes `core.module_schema_version`.
 5. `core.module_state` gets the row `installed` with the package version.
