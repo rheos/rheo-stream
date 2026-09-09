@@ -20,9 +20,13 @@ data, production exports, or secrets to public issues, PRs, test results, or log
 The path checks are deliberately limited and do not establish that arbitrary file
 contents are safe to publish.
 
-Keep private workspace data outside the checkout. The optional `/.rheo-local/`
-directory is ignored; it must not become the source of committed fixtures. Public
-packs contain generic defaults, while personal overrides remain private.
+Use the [parent workspace layout](docs/workspace-layout.md) to keep the public
+checkout alongside private configuration and runtime data. Open the parent in an
+editor, but run Git, builds, and publication from the child checkout. Do not create
+a Git repository at the parent or link private sibling content into the public
+tree. The optional `/.rheo-local/` directory is ignored; it must not become the
+source of committed fixtures. Public packs contain generic defaults, while
+personal overrides remain private.
 
 License and contribution terms remain undecided. Discuss architectural proposals
 through issues; defer substantial outside code contributions until those terms

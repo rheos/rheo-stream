@@ -886,6 +886,21 @@ workspace locations; a module requests scoped storage and must not choose arbitr
 paths or write user records into its installed package. Private files and directories
 use restrictive OS permissions appropriate to the owner or service account.
 
+For development, use an unversioned parent folder as the editor workspace, with
+the public `rheo-stream/` checkout beside private `private/`, `workspaces/`, and
+`backups/` directories. The parent has no Git repository. An operator-controlled
+path map outside the checkout connects these locations; do not expose private
+siblings through symlinks in source. Git, build contexts, and publication operate
+only on the child checkout. See the [workspace layout](../workspace-layout.md).
+
+This filesystem workspace is distinct from an authenticated application workspace:
+one local parent may hold data for several application workspaces, and opening the
+parent in an editor grants no application permissions. Runtime initialization must
+validate operator-configured roots and resolve each workspace's storage within
+them. Modules and incoming payloads cannot supply arbitrary paths. The scaffold's
+local path map records locations only; it does not yet implement runtime loading,
+module registration, or access control.
+
 Local and hosted workspaces use the same ownership model. Profiles, rates, service
 offerings, private agent guidance, configured pipelines, client records, and module
 settings live in workspace storage; personal preferences and credentials may also
@@ -1486,6 +1501,9 @@ history.
   configuration, migrations, removal, retained exports, and restoration.
 - A private data root outside the source checkout is the default; a reserved,
   ignored checkout-local directory supports development when explicitly selected.
+- The development workspace is an unversioned parent containing the public Git
+  checkout and private siblings. Explicit local configuration connects them; build
+  and publication roots remain inside the public checkout.
 - Generic authenticated intake, durable receipts, and explicit routing allow users
   to connect their own funnels without a core adapter for each product.
 - Transactional outbox delivery, idempotent consumers, and tracked handoffs provide

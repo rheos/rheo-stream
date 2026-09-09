@@ -49,8 +49,26 @@ keeping job search optional and the core independent of any profession.
 The repository contains reusable code, definitions, and synthetic examples.
 Personal profiles, rates, client data, prompts, credentials, conversations,
 databases, documents, and runtime output belong in private workspace storage.
-Local data should live outside the checkout. The reserved `/.rheo-local/`
-directory is an ignored development fallback, not a tracked example workspace.
+For development, open a parent folder containing the public checkout and private
+siblings:
+
+```text
+rheo-stream-workspace/      Editor workspace; no Git repository here
+  rheo-stream/             Public Git repository; build and publication root
+  private/                 Local configuration, documents, agent context, modules
+  workspaces/              Private runtime data, separated by application workspace
+  backups/                 Private backups
+  workspace.paths.json     Local path map; outside the public repository
+```
+
+Only `rheo-stream/` is versioned. Private siblings are outside its Git root; ignore
+rules inside the checkout cannot cover them. Keep Git, build, and publication
+operations rooted in the child repository, and connect private locations through
+explicit configuration. The reserved `/.rheo-local/` directory remains an ignored
+development fallback for users who deliberately choose checkout-local storage.
+
+See [workspace layout](docs/workspace-layout.md) for setup and connection boundaries.
+The path map describes the local arrangement; runtime loading is not implemented.
 
 See the [data boundary](docs/ideas/rheo-stream-idea.md#private-data-placement-in-each-deployment-mode)
 and [publication requirements](docs/ideas/rheo-stream-idea.md#public-repository-contents-and-private-workspace-contents).

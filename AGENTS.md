@@ -10,6 +10,12 @@ open questions. This repository currently contains a scaffold, not a working app
 - Keep code and examples public-safe. Personal profiles, private instructions,
   credentials, workspace data, logs, and exports belong outside the checkout or
   in the explicitly ignored local state directory.
+- When the editor opens a parent workspace, this child checkout remains the Git,
+  build-context, and publication root. Follow [the workspace layout](docs/workspace-layout.md).
+  Do not initialize Git at the parent, copy its private siblings into source, or
+  add symlinks that expose them through the public tree. Access private inputs only
+  when the task requires them; their visibility in an editor is not permission to
+  publish them or send them to an external service.
 - Use only synthetic fixtures. Do not access real workspaces or production data
   while running tests or creating examples.
 - Public module defaults must not contain a particular user's configuration.
