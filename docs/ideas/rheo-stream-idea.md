@@ -1576,9 +1576,11 @@ Settled by the [requirements and scope document](../requirements/requirements-an
 which records the rationale for each:
 
 - Postgres is the sole reference storage backend for the first release, with one
-  database or schema per workspace and a small shared control plane for accounts,
-  the workspace registry, and billing. Per-workspace SQLite becomes a contract goal
-  for a possible later local-first edition, not first-release code.
+  database or schema per workspace and a small shared control plane for accounts
+  and the workspace registry. Billing belongs to the hosted edition and joins the
+  control plane in that phase, not in the first release. Per-workspace SQLite
+  becomes a contract goal for a possible later local-first edition, not
+  first-release code.
 - The implementation stack is a Python core (FastAPI domain services) plus a
   Next.js web interface, chosen after an explicit comparison with a single
   TypeScript monolith.
@@ -1603,8 +1605,10 @@ which records the rationale for each:
 - The reference instance is a single-server container deployment behind a reverse
   proxy, so the web interface must not depend on hosting-platform-only features.
 - The workspace, membership, role, first-release-slice, confirmation-policy, and
-  relationships-contract questions are answered there; every other open question
-  below carries a recorded disposition.
+  relationships-contract questions are answered there. A record-level deletion
+  path for observations, parties, and opportunities is decided there as well, as
+  the deletion half of question 19. Every other open question below carries a
+  recorded disposition.
 
 ### Recorded changes of direction
 
@@ -1640,10 +1644,14 @@ Two reversals are recorded here.
 - One goal-oriented Rheo MCP façade is the initial agent boundary.
 - `claude -p` is a useful first local adapter. An OpenRouter adapter supplies its
   own agent loop; an API/agent SDK is appropriate for hosted operation. Validate
-  Codex's headless adapter and the rollout order through the common runtime contract.
+  Codex's headless adapter through the common runtime contract. The rollout order
+  is no longer open; it is settled above and recorded as a change of direction.
 - Workspace is the tenancy and portability boundary.
-- Per-workspace encrypted SQLite is a credible hosted storage option, especially
-  for local-first continuity and Tuttle compatibility.
+- Per-workspace encrypted SQLite remains a credible option for the hosted edition
+  and for a local-first edition, especially for local-first continuity and Tuttle
+  compatibility. It is not a first-release option: the first release settled on
+  Postgres and made per-workspace SQLite a contract goal, with no implementation
+  shipping.
 - A hybrid local-node design is the likely bridge between hosted Rheo sessions and
   local Tuttle data.
 - A clean modular monolith is a better beginning than premature microservices.
@@ -1680,14 +1688,19 @@ Two reversals are recorded here.
 - Detailed domain schemas, events, API, and MCP contracts.
 - Module manifest and capability compatibility contracts, domain-pack composition,
   and module lifecycle acceptance criteria beyond install and enable. The
-  relationships-module contract and the core/module boundary for the first release
-  are settled above.
+  relationships-module contract is settled above. The core/module boundary for the
+  first release is only partly settled there: the core surface and the first
+  configuration's dependencies are named, and the boundary detail is explicitly
+  left to the architecture specification.
 - Pipeline configuration limits, version migration, and the contact-purpose and
   retention contracts beyond the first release. Identity resolution rules and data
   ownership between Rheo Stream and an external CRM are settled above.
-- Reusable-pack export rules and packaging-allowlist detail. Private storage paths,
-  configuration precedence, secret storage, and publication checks for the first
-  release are settled above.
+- Reusable-pack export rules. Private storage paths, configuration precedence,
+  secret storage, and publication checks for the first release are partly settled
+  above: the required properties are stated as first-release requirements, while
+  the packaging-allowlist detail, the configuration precedence rules themselves,
+  and the choice of secret store are named there as architecture-specification
+  work. No secret store is chosen yet.
 - Voice and Telegram providers and operational details.
 - Depth and timing of the Tuttle integration.
 

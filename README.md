@@ -20,14 +20,20 @@ routing inquiries from its own websites and forms. Job search is one optional
 workflow; a workspace can feed Leads from its own funnels and referral partners
 and never touch a job board.
 
-**Status: idea and repository scaffold.** There is no runnable application yet.
-The implementation stack, storage topology, module contracts, and license are
-still being decided. Directory names mark intended boundaries, not implemented
-features.
+**Status: idea, proposed requirements, and repository scaffold.** There is no
+runnable application yet. Proposed requirements for the first release name the
+implementation stack (a Python core with a Next.js web interface), the storage
+topology (Postgres, one database or schema per workspace), and how much of the
+module contract that release implements; they await the maintainer's
+ratification. The full module manifest and the license are still open. Directory
+names mark intended boundaries, not implemented features.
 
 Start with the [idea document](docs/ideas/rheo-stream-idea.md). It sets out the
 product thesis, the architecture direction, and a decision ledger that keeps
-settled choices separate from open questions.
+settled choices separate from open questions. The
+[requirements and scope](docs/requirements/requirements-and-scope.md) and the
+[build plan](docs/requirements/build-plan.md) propose what the first release
+does and in what order.
 
 ## Why this exists
 

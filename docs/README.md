@@ -4,11 +4,14 @@
   and open architecture questions.
 - [Workspace layout](workspace-layout.md): public checkout and connected private
   siblings under a local, unversioned parent.
-- [Requirements](requirements/README.md): accepted scope, decisions, functional
-  requirements, and the phased build plan with its acceptance criteria.
+- [Requirements](requirements/README.md): proposed scope, decisions, functional
+  requirements, and the phased build plan with its acceptance criteria. Awaiting
+  the maintainer's ratification; not yet accepted.
 - [Architecture](architecture/README.md): future contracts, designs, and decisions.
 
-The idea document is the starting point and the requirements documents close the
-decisions it left open. Remaining directory placeholders are not approved
+The idea document is the starting point and the requirements documents propose
+closures for the decisions it left open. Neither requirements document is
+accepted yet: the maintainer's review of the pull request that carries them is
+the ratification step. Remaining directory placeholders are not approved
 specifications. Record accepted decisions explicitly and keep private user or
 deployment details out of public documentation.

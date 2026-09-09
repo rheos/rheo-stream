@@ -1,10 +1,10 @@
 # Rheo Stream — requirements and scope
 
-**Status:** Proposed requirements for release one, awaiting maintainer ratification. The ten
-settled decisions D1 to D10 record directions the maintainer already gave. The four questions
-under [Questions resolved here](#questions-resolved-here), R1 to R4, were resolved on the
+**Status:** Proposed requirements for release one, awaiting maintainer ratification. The eleven
+settled decisions D1 to D11 record directions the maintainer already gave. The five decisions
+under [Questions resolved here](#questions-resolved-here), R1 to R5, were taken on the
 maintainer's behalf rather than by the maintainer, and the maintainer's review of the pull
-request that carries this document is the ratification step. Until that review, treat R1 to R4
+request that carries this document is the ratification step. Until that review, treat R1 to R5
 as proposals with recorded reasoning, not as accepted decisions.
 **Lineage:** This file replaces `docs/requirements/rheo-stream-requirements.md`, which was
 created earlier on this document's own branch as a two-line placeholder reading "Status: draft
@@ -50,7 +50,7 @@ directly and must not block the rest.
 | HR consultant, regulatory approval consultant, sales representative | Specialist records and rules in their own modules on shared infrastructure | Not served. Exercised only by a synthetic example module during the framework-proof phase. |
 | Technical user wanting selected modules | Install some modules, connect other tools | Partly served: modules are separately installable and enableable; disable and removal ship later. |
 | Hosted customer | Managed isolated workspace | Not served. The hosted edition is a later, deliberately unplanned phase. |
-| Contributor building a source adapter, channel, memory strategy, or integration | A documented extension point that does not require learning the whole system | Partly served: the intake connector contract and the runtime contract are documented and exercised by two implementations each. |
+| Contributor building a source adapter, channel, memory strategy, or integration | A documented extension point that does not require learning the whole system | Partly served: both the intake connector contract and the runtime contract are documented in release one. The intake contract is exercised by three transports in release one; the runtime contract is exercised by a second implementation by v1.0, not in release one (D4). |
 
 ## Settled decisions
 
@@ -59,16 +59,17 @@ against them; neither reopens them.
 
 | # | Decision | Rationale |
 | --- | --- | --- |
-| D1 | **Postgres is the sole reference storage backend for release one, with one database (or schema) per workspace, plus a small shared control plane for accounts, the workspace registry, and billing.** A self-hosted install is a container stack with a Postgres container. | The idea document requires choosing and operating one reference storage implementation first, and warns that keeping SQL behind adapters does not by itself prove parity: transactions, locks, search, migrations, and recovery each need validating per backend. Database-per-workspace keeps the physical-isolation property the idea document values without paying for two production backends. Partially answers idea-doc question 2. |
+| D1 | **Postgres is the sole reference storage backend for release one, with one database (or schema) per workspace, plus a small shared control plane for accounts and the workspace registry.** A self-hosted install is a container stack with a Postgres container. Billing belongs to the hosted edition and is added to the control plane in that phase; release one holds none. | The idea document requires choosing and operating one reference storage implementation first, and warns that keeping SQL behind adapters does not by itself prove parity: transactions, locks, search, migrations, and recovery each need validating per backend. Database-per-workspace keeps the physical-isolation property the idea document values without paying for two production backends. Partially answers idea-doc question 2. |
 | D2 | **Per-workspace SQLite is a contract goal, not release-one code.** The storage adapter seam, the export format, and the behavioural test suite are written so a later local-first edition can supply a second backend. No SQLite implementation ships in release one. | Preserves the portability promise without claiming support that has not been exercised. Guardrail 7 becomes an architecture obligation rather than a release-one deliverable. |
 | D3 | **The implementation stack is a Python core (FastAPI domain services) plus a Next.js web interface.** | Decided after an explicit comparison against a single TypeScript monolith. The TypeScript option would have bought a one-process deployment and a cheaper port of the work-in-motion interface. The Python option wins on porting the existing scoring and proposal-preparation code, on typed-contract fit, on adjacency to the external back-office integration target, and on maintainer familiarity. Both options were viable; this is a preference backed by port cost, not a claim that the alternative fails. |
 | D4 | **`ClaudeCliRuntime` ships first. The OpenRouter adapter is the second implementation and is required for v1.0, not for the first working slice. Codex CLI remains a validation target.** | The runtime contract is only proven by a structurally different second implementation, so the OpenRouter adapter is not optional; it is sequenced. Shipping both before the first useful slice would delay every domain decision behind runtime work. See [Recorded changes of direction](#recorded-changes-of-direction). |
 | D5 | **Module lifecycle: full contract on paper, install and enable in code.** The specification defines the complete manifest and lifecycle contract. Release one implements install and enable only. Disable, remove, purge, and restore are a defined later milestone. | The idea document names "modularity that ends at installation" as a principal risk, so the contract must be written now. It also names "building an automation platform before a useful workflow" as a risk, so the lifecycle machinery must not be built now. Writing the contract and deferring most of its implementation is the only way to honour both. |
-| D6 | **An OAuth code-host provider is the first login provider, behind a pluggable identity-provider boundary.** Other providers (email magic link and so on) land later without touching domain code. Self-hosters register their own OAuth application; client id and secret live in private deployment configuration. CLI and MCP access uses local tokens, not browser OAuth. | The first users are developers who already hold such an account, so it removes a password store from release one entirely. The boundary exists so that this convenience does not become a permanent requirement for non-developer users. |
+| D6 | **An OAuth code-host provider is the first login provider, behind a pluggable identity-provider boundary.** Other providers, email and password first among them, land later without touching domain code. Self-hosters register their own OAuth application; client id and secret live in private deployment configuration. CLI and MCP access uses local tokens, not browser OAuth. | The first users are developers who already hold such an account, so it removes a password store from release one entirely. The boundary exists so that this convenience does not become a permanent requirement for non-developer users. |
 | D7 | **URL topology is configuration, not hard-coded.** Single-host path mode is the default for self-hosters. Subdomain-per-module is a supported option and is what the reference deployment uses. All link generation goes through routing configuration. | A self-hoster with one hostname and one certificate must not be forced into wildcard DNS. The reference deployment must not be the only tested arrangement. See [Recorded changes of direction](#recorded-changes-of-direction). |
 | D8 | **The web interface is ported from the two predecessor applications, not rewritten.** Screens are carried over, design tokens and theme unified, and upgrades made only where cheap. | Rebuilding working interface code is the fastest route to the "endless rewrite" risk the idea document names. The port is bounded by the [UI port inventory](#ui-port-inventory) and gated by guardrail 1 and the publication rules, because ported interface code carries legacy names, hard-coded paths, and sometimes real data. |
 | D9 | **The memory port includes a real retrieval-layer rework.** The memory layer inside the work-in-motion predecessor uses `sqlite-vec` for embeddings and FTS5 for search. Neither exists in Postgres. The port replaces them with pgvector and with `tsvector`/`pg_trgm` or a hybrid, behind the retrieval adapter the idea document already requires. | Sized explicitly as its own requirement so it is not discovered mid-port. Containing it behind the retrieval adapter keeps the choice of ranking strategy revisable. |
 | D10 | **The reference instance is a single-server container deployment behind a reverse proxy with a wildcard certificate.** It is the reference self-host deployment under guardrail 15, so the web interface must not depend on platform-only features: no reliance on a particular hosting provider's edge functions, image pipeline, or build integrations. | Guardrail 15 says hosted-only assumptions must not accumulate unnoticed. The cheapest way to enforce that is to make the maintainer's own daily instance a plain self-host. |
+| D11 | **The memory module is the first real module, shipping after the walking skeleton and before the opportunity core.** | It is the smallest domain that can prove the module contract end to end. It owns records, migrations, configuration, tools with declared safety classes, an export format, and interface contributions, and it needs no other module to do any of that. Proving the contract on the opportunity core instead would entangle the first module-contract test with intake, party resolution, and pipeline configuration, so a contract defect and a domain defect would be indistinguishable. This is the decision the idea document's ledger already attributes to this document under module order; it is recorded here as its own row so that nothing else has to carry it. |
 
 ### Historical migration notes
 
@@ -122,8 +123,10 @@ module. Constraints that come with the override:
 
 ## Questions resolved here
 
-Four idea-document questions are answered below rather than deferred. Each is a decision the
-maintainer ratifies by accepting this document.
+Five decisions are taken below rather than deferred. Four of them answer an idea-document
+question outright. The fifth, R5, closes the deletion half of idea-doc question 19, which
+release one cannot honestly ship with open. Each is a decision the maintainer ratifies by
+accepting this document.
 
 ### R1. Workspace, membership, role, and invitation for a one-person start
 
@@ -183,13 +186,13 @@ mandatory sequence in which every lead becomes a project, and building the desti
 the source would invert the dependency.
 
 **How much memory support belongs in it: the whole module, off the critical path.** The memory
-module ships in phase two, before the opportunity core, because it is the smallest domain that
-can prove the module contract. In the first release slice Rheo can recall and remember with
-workspace and record permissions enforced, and memories can link back to Leads records. The
-intake-to-outcome path must complete correctly in a workspace where the memory module was never
-installed and never enabled. If it cannot, the module boundary is wrong. Release one has no
-workspace-level disable path to test against, because D5 places disable in the later
-module-lifecycle milestone, so the boundary is proved by the module's absence instead.
+module ships in phase two, before the opportunity core, per D11. In the first release slice Rheo
+can recall and remember with workspace and record permissions enforced, and memories can link
+back to Leads records. The intake-to-outcome path must complete correctly in a workspace where
+the memory module was never installed and never enabled. If it cannot, the module boundary is
+wrong. Release one has no workspace-level disable path to test against, because D5 places
+disable in the later module-lifecycle milestone, so the boundary is proved by the module's
+absence instead.
 
 **Rationale.** The idea document's own success criterion is one person installing the system,
 connecting their own funnel, choosing a pipeline, and developing opportunities while retaining
@@ -288,6 +291,41 @@ contact points plus affiliation. Automatic matching is restricted to authenticat
 because a wrong merge is a privacy event, not an inconvenience: it can expose one client's
 correspondence inside another's record.
 
+### R5. Record-level deletion for observations, parties, and opportunities
+
+*Answers the deletion half of idea-doc question 19.*
+
+**Decision.** Release one ships a record-level deletion path for observations, parties, and
+opportunities. It sits in the destructive safety class under R3, so every deletion takes an
+explicit per-action confirmation and no standing grant ever covers it. Deletion cascades the way
+FR 28 already requires for memory: derived summaries, embeddings, queued actions, and exports
+that carry the record go with it. Every deletion leaves a durable record of what was deleted, by
+whom, and when, and that record retains none of the deleted content.
+
+Specifically:
+
+- The unit of deletion is one record of one of the three types, named by identifier. Release one
+  has no bulk erase and no scheduled expiry beyond the memory retention setting FR 29 already
+  requires.
+- Deleting a party does not delete the observations that referenced it. Those observations lose
+  the party reference and become unlinked evidence, because destroying a delivery receipt would
+  break FR 33's guarantee that an acknowledged receipt is durable.
+- Deletion is distinct from permission withdrawal under FR 46. Withdrawal stops future contact
+  and future use; deletion removes the record. Neither implies the other, and the interface must
+  not present them as one act.
+- The deletion record holds identifiers, actor, time, and record type only. It is not an undo
+  log. Deletion is not reversible, and nothing in this path restores a deleted record.
+
+**Rationale.** Release one accepts real personal data belonging to third parties through a live
+inbound form. Someone who filled in that form and later asks to be removed has to be answerable,
+and nothing else in this document answers them: FR 28 cascades deletion for memory only, and
+FR 46 covers permission to contact, which is not erasure. The alternative was to state plainly
+that release one has no deletion path and to defer one to the architecture specification. That
+was rejected because the data belongs to people who did not choose this system, and a first
+release that can ingest a stranger's details but cannot remove them is not a defensible starting
+position. The path is deliberately narrow, one record at a time, always confirmed, never
+reversible, so that its narrowness is a safety property rather than a missing feature.
+
 ## Functional requirements
 
 Release one must satisfy the following. Numbering is stable and is cited by the build plan's
@@ -303,7 +341,10 @@ acceptance criteria.
 - **FR 3.** Authentication uses a pluggable identity-provider boundary with an OAuth code-host
   provider as the first implementation. Domain code depends on the boundary, not the provider.
 - **FR 4.** Command-line and MCP clients authenticate with locally issued tokens scoped to an
-  actor, a workspace, and a permitted operation set. They do not use browser OAuth.
+  actor, a workspace, and a permitted operation set. A token is issued in one of two ways: from
+  an already-authenticated web session, or, on a headless install with no browser available, by
+  an operator-level command against the control plane. Once issued, the token is presented and
+  used without any browser flow.
 - **FR 5.** Membership carries a role of `owner` or `member`; every authorization check reads
   the role rather than assuming a single user (see R1).
 - **FR 6.** Personal preferences and personal credentials are distinguishable in the model from
@@ -313,7 +354,8 @@ acceptance criteria.
 ### Storage, configuration, and private data
 
 - **FR 7.** Each workspace's operational data lives in its own Postgres database or schema. A
-  separate small control plane holds accounts, the workspace registry, and billing metadata.
+  separate small control plane holds accounts and the workspace registry. The hosted edition adds
+  billing metadata to that control plane in its own phase; release one holds none.
 - **FR 8.** Storage-specific SQL sits behind repository or storage-adapter interfaces, and the
   behavioural test suite is written against the interface rather than against Postgres, so a
   second backend can later be proven rather than assumed.
@@ -324,7 +366,9 @@ acceptance criteria.
   operator-configurable data root that the host validates at startup. The reserved
   checkout-local directory is the explicit opt-in, and it is ignored by Git.
 - **FR 11.** Modules obtain storage through the core's storage API and cannot choose arbitrary
-  filesystem paths or write records into their installed package.
+  filesystem paths or write records into their installed package. A module writes no other
+  module's storage, and effects a change to a record another module owns only through that
+  module's public operations and events.
 - **FR 12.** Configuration has three distinct sources with validated precedence: public package
   defaults, private deployment settings, and private workspace or member overrides. A workspace
   override cannot relax an operator security policy.
@@ -446,6 +490,27 @@ acceptance criteria.
 - **FR 50.** Ported interface code is reviewed for legacy names, hard-coded API paths, embedded
   personal data, and private deployment details before it enters the public repository.
 
+### Deletion, export, and migration
+
+These three are appended after FR 50 so that the numbering above stays stable.
+
+- **FR 51.** Deleting an observation, a party, or an opportunity is a supported record-level
+  operation in the destructive safety class (R3, R5). It takes an explicit per-action
+  confirmation that no standing grant satisfies; it removes the record's derived summaries,
+  embeddings, and exports along with the record; it cancels queued actions that depend on the
+  record; and it writes a durable deletion record naming the actor, the time, the record type,
+  and the record identifier while retaining none of the deleted content.
+- **FR 52.** A workspace export produces an artifact that restores into an empty deployment with
+  its module composition, configuration versions, module schema versions, and records intact.
+  Each module declares its own export format in its manifest, so a module's records travel with
+  the workspace rather than needing core knowledge of that module. A restored pending approved
+  action requires a fresh approval before it can execute.
+- **FR 53.** Migrating a predecessor data store into a Rheo Stream module is verified before
+  switchover: every source record has a destination record, and a sampled set of retrieval
+  queries returns the same records under the new implementation as under the old one, within a
+  documented tolerance. The verification result is recorded where the migrated data lives, in
+  private workspace storage, and never in the public repository.
+
 ## Release-one scope boundary
 
 ### In scope
@@ -456,8 +521,12 @@ acceptance criteria.
 - The memory module, ported with its retrieval layer reworked, plus migration and cutover from
   the predecessor.
 - The relationships module at the R4 contract.
-- Generic intake with three transports, the opportunity core, one configurable pipeline preset,
-  and the first real funnel.
+- Generic intake with three transports, the opportunity core, and the first real funnel.
+- Exactly one configurable pipeline preset, inbound services. Both release-one funnels, the real
+  one and the synthetic event-referral fixture, route into it through different declarative
+  mappings and different routing rules.
+- A record-level deletion path for observations, parties, and opportunities (R5).
+- Workspace export and restore, and verified migration of the predecessor memory store.
 - The first web interface, ported.
 - Module install and enable.
 - Login through one OAuth code-host provider.
@@ -468,6 +537,9 @@ acceptance criteria.
 - The optional job-search workflow: no job boards, no candidate profile, no application
   preparation, no scoring rubric for employment fit.
 - Module disable, remove, purge, and restore. The contract is written; the code is later.
+- Any second pipeline preset, including a dedicated referral preset.
+- Bulk erase, scheduled expiry outside the memory retention setting, and any reversal of a
+  deletion (R5).
 - Domain packs, the capability registry as a queryable product surface, and arbitrary hosted
   plugins.
 - The second runtime adapter, Codex CLI validation, Telegram, and voice.
@@ -493,7 +565,7 @@ stack facts, at the granularity the idea document's legacy-to-new map already us
 | Source and connection settings | Same | Same | Leads, core | Port in phase three, reshaped around the generic connection contract rather than per-provider forms. |
 | Work queue, board, and work-item detail | Work-in-motion predecessor (M.O.T.) | Next.js with Drizzle over `better-sqlite3` | Current | Deferred to phase five. Out of release one. |
 | Memory browse, search, and entity views | Memory layer inside the work-in-motion predecessor | Next.js, `sqlite-vec` embeddings, FTS5 search | Recallatron | Port in phase two. The interface carries over; the retrieval layer beneath it does not (D9). |
-| Application shell, navigation, theme | Both, divergently | React/Vite and Next.js | Core | Unify in phase two on Next.js. One token set, one theme, one navigation contract that modules contribute to. This is the only part of the port that is deliberately a rewrite. |
+| Application shell, navigation, theme | Both, divergently | React/Vite and Next.js | Core | The shell itself is not a port. Phase one builds it new on Next.js as part of the repository bootstrap, carrying only a login, a workspace switcher, and the routing configuration every link goes through. Phase two unifies navigation and theme on top of it: one token set, one theme, one navigation contract that modules contribute to. This is the only part of the interface work that is deliberately a rewrite rather than a port. |
 
 What the renaming sweep touches, in every ported file, per FR 49 and guardrail 1:
 
@@ -569,17 +641,18 @@ Each with its source. An assumption without a source is an open question, not a 
 
 | Assumption | Source | Note |
 | --- | --- | --- |
-| The maintainer already operates a site with an inbound-inquiry form that can post a webhook | Resolved grill decision; idea document's custom-funnel requirement | The first real funnel. Never named in public documentation. |
-| The opportunity-discovery predecessor runs FastAPI plus React/Vite on MySQL | Resolved grill decision, verified in source | Sizes the port and makes it a MySQL-to-Postgres move. |
-| The work-in-motion predecessor runs Next.js with Drizzle over `better-sqlite3` | Resolved grill decision, verified in source | Sizes the port. |
-| The memory layer uses `sqlite-vec` and FTS5, not pgvector | Resolved grill decision, verified in source | The reason D9 exists. |
-| The maintainer prefers Python for domain services | Resolved grill decision | One of four inputs to D3; not the only one. |
-| The maintainer accepts `ClaudeCliRuntime` first and the OpenRouter adapter as a v1.0 requirement rather than a first-slice one | Resolved decision from the plan review that preceded this document | The source for the first entry under [Recorded changes of direction](#recorded-changes-of-direction). Without it, D4's rollout order is a preference with no recorded origin. |
-| The maintainer wants module boundaries visible in the address bar of the instance they use daily | Resolved decision from the plan review that preceded this document | The source for the second entry under [Recorded changes of direction](#recorded-changes-of-direction). It buys a routing table, not a deployment per module, and single-host path mode stays the default so guardrail 15 is unaffected. |
-| The reference instance is a single-server container deployment behind a reverse proxy with a wildcard certificate | Resolved grill decision | Makes guardrail 15 self-enforcing. |
+| The maintainer already operates a site with an inbound-inquiry form that can post a webhook | Maintainer decision, recorded before this document; idea document's custom-funnel requirement | The first real funnel. Never named in public documentation. |
+| That form supplies neither an authenticated subject identifier nor a source-verified email address | Implied by R4 | ASSUMED default: neither, until the form's own behaviour is confirmed. Under R4 that makes the first funnel review-candidate-only for party matching: a second inquiry from the same person creates a second party and a review candidate rather than an automatic link. If the form later gains a confirmation step, its verified email becomes automatic-match evidence with no change to the contract. |
+| The opportunity-discovery predecessor runs FastAPI plus React/Vite on MySQL | Maintainer decision, recorded before this document; verified in source | Sizes the port and makes it a MySQL-to-Postgres move. |
+| The work-in-motion predecessor runs Next.js with Drizzle over `better-sqlite3` | Maintainer decision, recorded before this document; verified in source | Sizes the port. |
+| The memory layer uses `sqlite-vec` and FTS5, not pgvector | Maintainer decision, recorded before this document; verified in source | The reason D9 exists. |
+| The maintainer prefers Python for domain services | Maintainer decision, recorded before this document | One of four inputs to D3; not the only one. |
+| The maintainer accepts `ClaudeCliRuntime` first and the OpenRouter adapter as a v1.0 requirement rather than a first-slice one | Maintainer decision recorded in the idea document's decision ledger | The source for the first entry under [Recorded changes of direction](#recorded-changes-of-direction). Without it, D4's rollout order is a preference with no recorded origin. |
+| The maintainer wants module boundaries visible in the address bar of the instance they use daily | Maintainer decision recorded in the idea document's decision ledger | The source for the second entry under [Recorded changes of direction](#recorded-changes-of-direction). It buys a routing table, not a deployment per module, and single-host path mode stays the default so guardrail 15 is unaffected. |
+| The reference instance is a single-server container deployment behind a reverse proxy with a wildcard certificate | Maintainer decision, recorded before this document | Makes guardrail 15 self-enforcing. |
 | Postgres extensions for vector and text search are available in the deployment | Implied by D1 and D9 | ASSUMED default: a standard Postgres image with pgvector available. If a target deployment cannot supply it, the retrieval adapter absorbs the change (FR 30). |
 | The first users hold an account with the chosen OAuth code host | Implied by D6 | ASSUMED default. The identity-provider boundary exists precisely because this stops being true for later personas. |
-| Release one has one human user | Resolved grill decision (one-person start) | Drives R1's scope, not R1's structure. |
+| Release one has one human user | Maintainer decision, recorded before this document (one-person start) | Drives R1's scope, not R1's structure. |
 | `rheo.stream` is registered and available for the reference deployment's subdomains | Idea document | Wildcard DNS and certificate are a deployment prerequisite for subdomain mode only. |
 
 ## Disposition of every idea-document open question
@@ -600,18 +673,18 @@ All 24, none dropped.
 | 10 | Which runtime ships first, which is the hosted default, what checks each must pass | **Answered here**, D4, for rollout order. The hosted default remains open until the hosted-edition phase. The capability checks are fixed by FR 20 and designed in the architecture specification. |
 | 11 | Confirmation policy for messages, submissions, destructive changes, financial actions | **Answered here**, R3, as policy shape and safety classes. Final rules deferred to the architecture specification. |
 | 12 | What data is sent to model providers; redaction, retention, user control | Deferred to the architecture specification's security section. FR 13 and FR 27 fix the boundary; the specification fixes the redaction contract. |
-| 13 | How export/import, schema migration, and disaster recovery are tested | Partly answered: the walking-skeleton phase requires export and restore to work and be tested. The full disaster-recovery test plan is deferred to the architecture specification. |
+| 13 | How export/import, schema migration, and disaster recovery are tested | Partly answered by FR 52 and FR 53: export and restore is required and is tested at the end of each release-one phase, and a predecessor migration is verified before switchover. The full disaster-recovery test plan is deferred to the architecture specification. |
 | 14 | Which open-source licence and contributor model | **Deliberately deferred** to the framework-proof phase, before a v0.1 release and before accepting substantial outside contributions. |
 | 15 | Minimum useful direct-voice experience, and whether voice waits | Deferred to the channels phase. Direction recorded: voice waits until text interaction and the permission model are stable. |
 | 16 | Which intake transports and which two unrelated custom-funnel examples validate the contract | **Answered here**: three transports in FR 32; the two funnels are the maintainer's own inbound-inquiry form and a synthetic event-referral funnel exercised as a fixture, per the opportunity-core phase. |
 | 17 | What users can configure in pipeline presets, and how records migrate on change | Deferred to the architecture specification. FR 43 fixes the required property (pinned configuration versions); the specification fixes the limits and the migration operation. |
 | 18 | Minimum relationships contract, CRM field ownership, automatic match and merge evidence | **Answered here**, R4. |
-| 19 | Permission purposes, recipient scopes, suppression, retention, external correction and deletion | Partly answered by FR 46 and FR 29 for release one. The full set of purposes and the external correction and deletion flows are deferred to the architecture specification. |
+| 19 | Permission purposes, recipient scopes, suppression, retention, external correction and deletion | Partly answered. The deletion half is **answered here**, R5 and FR 51: release one has a record-level deletion path for observations, parties, and opportunities. Permission, suppression, and retention are answered by FR 46 and FR 29. The full set of purposes, the recipient-scope vocabulary, and the external correction flow are deferred to the architecture specification. |
 | 20 | What belongs in the minimum core, which capabilities become shared modules, which dependencies the first configuration needs | Partly answered here: the core surface is the six responsibilities in the idea document's shared-infrastructure table; relationships is the only shared business module in release one; the first configuration depends on relationships, Leads, and optionally the memory module. Boundary detail deferred to the architecture specification. |
 | 21 | Module manifest, capability compatibility, registration, provenance, contract-test requirements | Deferred to the architecture specification, per D5: the full contract is written there, and release one implements install and enable only. |
 | 22 | How domain packs compose and upgrade without overwriting workspace choices | Deferred to the framework-proof phase. Domain packs are out of release one. |
 | 23 | How detached records are read and restored, migrations recovered, jobs reconciled on removal | Deferred to the module-lifecycle milestone, per D5. |
-| 24 | Private data paths, member scopes, secret stores, packaging allowlists, publication checks | Partly answered by FR 10 to FR 14 and enforced from the walking-skeleton phase. Packaging allowlist detail deferred to the architecture specification. |
+| 24 | Private data paths, member scopes, secret stores, packaging allowlists, publication checks | Partly answered by FR 10 to FR 14, and the private-data-path and publication-check halves are enforced from the walking-skeleton phase. Deferred to the architecture specification: the packaging allowlist detail, the configuration precedence rules themselves, and the choice of secret store, which this document does not name. |
 
 ## The 26 guardrails in this document
 
@@ -626,7 +699,7 @@ means it is an architecture-specification obligation; **L** means a named later 
 | 3. No user-selected database paths or tenant identifiers | R | FR 2 |
 | 4. Domain services do not depend directly on Claude | R | FR 19 |
 | 5. The MCP server calls services, not databases | R | FR 22 |
-| 6. Modules do not write one another's storage | R | FR 15, and the memory module's isolation under FR 26 |
+| 6. Modules do not write one another's storage | R | FR 11 |
 | 7. Storage-specific SQL stays behind repositories or adapters | R + A | FR 8 creates the seam; D2 makes proving a second backend an architecture obligation, not a release-one claim |
 | 8. Every workspace tracks composition and schema versions | R | FR 9 |
 | 9. Identifiers are globally safe | A | Identifier scheme is an architecture-specification deliverable |
