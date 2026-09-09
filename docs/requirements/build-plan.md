@@ -198,8 +198,10 @@ ships in this phase.
     route string hard-coded to one topology. This phase's surface is the application shell, the
     login, the workspace switcher, the post-login redirect, and the OAuth callback URL, and the
     last two are topology-sensitive, so they are in scope here rather than later. In subdomain
-    mode that surface is served on the shell host the companion document names under its
-    recorded changes of direction. The interface test suite covering that surface passes in
+    mode that surface spans the shell host and the identity host the companion document names
+    under its recorded changes of direction, and the callback resolves to the identity host in
+    subdomain mode and to a path on the single origin in single-host path mode, from the same
+    routing configuration. The interface test suite covering that surface passes in
     single-host path mode and in subdomain mode with no code change between the two runs, and
     both runs are a continuous-integration gate from this phase onward, over whatever interface
     surface exists when it runs. *(Scenario: Fresh public clone; FR 47.)*

@@ -122,7 +122,9 @@ home for the project.
 Likely public endpoints, when they are needed, include:
 
 - `rheo.stream` — project and product home
-- `app.rheo.stream` — hosted application
+- `circuit.rheo.stream` — the application shell (originally `app.`; see the recorded
+  change of direction in the decision ledger)
+- `auth.rheo.stream` — login and the OAuth callback
 - `docs.rheo.stream` — documentation
 - `api.rheo.stream` — public application API
 - `mcp.rheo.stream` — MCP endpoint
@@ -1615,7 +1617,7 @@ which records the rationale for each:
 ### Recorded changes of direction
 
 Later documents should not reverse settled direction without recording the reason.
-Two reversals are recorded here.
+Three reversals are recorded here.
 
 1. **Runtime rollout order.** This document states that Claude CLI and OpenRouter
    execution "are explicit requirements." That is softened to a rollout order:
@@ -1630,18 +1632,33 @@ Two reversals are recorded here.
    are unnecessary unless the modules later become independently deployed public
    services." That is overridden. Subdomain-per-module is supported and is what the
    reference deployment uses (`leads.`, `current.`, and so on, alongside `api.`,
-   `mcp.`, and `docs.`, with the application shell on `app.` and `tuttle.` reserved
-   for the integration surface only). Reason: the maintainer wants module boundaries
+   `mcp.`, and `docs.`, with the application shell on `circuit.`, the login and OAuth
+   callback on `auth.`, and `tuttle.` reserved for the integration surface only).
+   Reason: the maintainer wants module boundaries
    visible in the address bar of the instance used daily, and one application
    serving every host through host-based routing costs a routing table rather than a
-   deployment per module. Constraints: modules are not separately deployed; in
-   subdomain mode one session covers the shell host and the module hosts the
-   application serves, and hosts it does not serve must not receive the session
-   cookie; single-host path mode remains the default and stays
+   deployment per module. Identity sits on its own host so the registered callback
+   URL does not move when the shell changes and a later second front end can share
+   one identity endpoint. Constraints: neither modules nor identity are separately
+   deployed, `auth.` being a route boundary rather than a second service; in
+   subdomain mode one session covers the shell host, the identity host and the module
+   hosts the application serves, and hosts it does not serve must not receive the
+   session cookie; in single-host path mode there is no identity host and the callback
+   is a path on the single origin; single-host path mode remains the default and stays
    continuously exercised under guardrail 15; and a hosted multi-tenant edition must
    choose deliberately between module subdomains and per-tenant subdomains, because
    they compete for the same namespace level and a wildcard certificate covers one
    level only.
+3. **The shell host is `circuit.`, not `app.`** This document's endpoint list named
+   `app.rheo.stream` as the hosted application. Renamed. Reason: under the module
+   subdomains above, `app.` is ambiguous, because `leads.` and `current.` are equally
+   "the application"; `circuit.` names the surface that carries the shell and the
+   workspace switcher specifically. An electrical circuit and a water circuit are both
+   ordinary usage, so the name reads in the same register as `rheo.stream` and
+   `current.`, and a circuit is also a route made in rounds, which is what the shell is
+   for. Nothing else changes: the shell host is still one host among the several a
+   single application serves through host-based routing, and in single-host path mode
+   it does not exist at all. The name is configuration like every other host here.
 
 ### Preferred but still to validate
 

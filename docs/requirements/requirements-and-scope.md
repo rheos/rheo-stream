@@ -86,7 +86,7 @@ facts about superseded private systems, not descriptions of Rheo Stream.
 ## Recorded changes of direction
 
 The idea document asks later documents not to reverse its settled direction without
-recording the reason. Two reversals follow.
+recording the reason. Three reversals follow.
 
 **1. Runtime rollout order.** The idea document states that Claude Code print mode and
 OpenRouter API execution "are explicit requirements." This document softens that into a
@@ -104,27 +104,46 @@ unnecessary unless the modules later become independently deployed public servic
 document overrides that. Subdomain-per-module is a supported topology and is what the
 reference deployment uses: `leads.rheo.stream`, `current.rheo.stream`, and so on, alongside
 `api.`, `mcp.`, and `docs.`, with the apex serving the project and marketing page. The
-application shell, the login, the workspace switcher, and the OAuth callback are served on
-`app.rheo.stream`, so that the apex stays a static page and the callback URL has one host per
-topology. `tuttle.rheo.stream` is reserved for the integration surface only, since that
+application shell and the workspace switcher are served on `circuit.rheo.stream`, and the login
+and the OAuth callback on `auth.rheo.stream`, so that the apex stays a static page and identity has
+one endpoint that does not move when the shell changes. Splitting identity off the shell host
+keeps the registered callback URL stable for a self-hoster and lets a later second front end
+share one identity endpoint rather than registering its own. `tuttle.rheo.stream` is reserved
+for the integration surface only, since that
 back-office application stays external and local-first. Reason: the maintainer wants the module
 boundaries visible in the address bar of the instance they use daily, and one application
 serving all hosts through host-based routing costs a routing table, not a deployment per
 module. Constraints that come with the override:
 
-- One application serves the shell host and every module subdomain through host-based
-  routing. Modules are not separately deployed services.
-- In subdomain mode one session covers the shell host and the module hosts, which are the
-  hosts the application serves. The `api.` and `mcp.` hosts authenticate by token (FR 4) and
-  ignore the session cookie. The apex, the `docs.` host, and the reserved integration host are
-  not served by the application and must not receive the session cookie; whether that is
-  arranged by cookie scope or by the reverse proxy stripping it is an architecture-specification
-  decision. Wildcard DNS plus a wildcard certificate cover the set.
+- One application serves the shell host, the identity host, and every module subdomain
+  through host-based routing. Neither the modules nor identity are separately deployed
+  services: `auth.` is a route boundary and a stable callback address, not a second
+  deployment.
+- In subdomain mode one session covers the shell host, the identity host, and the module
+  hosts, which are the hosts the application serves. The `api.` and `mcp.` hosts authenticate
+  by token (FR 4) and ignore the session cookie. The apex, the `docs.` host, and the reserved
+  integration host are not served by the application and must not receive the session cookie;
+  whether that is arranged by cookie scope or by the reverse proxy stripping it is an
+  architecture-specification decision. Wildcard DNS plus a wildcard certificate cover the set.
+- The identity host is the only registered OAuth redirect target. In single-host path mode
+  there is no identity host and the callback is a path on the single origin; both arrangements
+  are produced from routing configuration, never from a hard-coded host.
 - Single-host path mode remains the default and stays continuously exercised, because
   guardrail 15 makes the plain self-host arrangement the one that must not rot.
 - Carried forward to the hosted edition: module subdomains compete with per-tenant subdomains
   for the same namespace level, and a wildcard certificate covers one level only. A hosted
   multi-tenant edition must choose its scheme deliberately rather than inheriting this one.
+
+**3. The shell host is `circuit.`, not `app.`** The idea document's endpoint list names
+`app.rheo.stream` as the hosted application. This document renames it. Reason: under the module
+subdomains above, `app.` is ambiguous, since `leads.` and `current.` are equally "the
+application"; `circuit.` names the surface carrying the shell and the workspace switcher
+specifically. An electrical circuit and a water circuit are both ordinary usage, so the name
+sits in the same register as `rheo.stream` and `current.`, and a circuit is also a route made in
+rounds, which is what the shell is for. Nothing structural changes: the shell host remains one
+host among the several a single application serves through host-based routing, and in
+single-host path mode it does not exist at all. Like every other host here, the name is
+configuration, and a self-hoster may choose another.
 
 ## Questions resolved here
 
