@@ -164,8 +164,8 @@ ships in this phase.
     its requirement that runtime configuration stay access-controlled and out of every artifact
     that does not need it; FR 13, guardrail 14.)*
 18. Every registered MCP tool and every registered service operation declares exactly one safety
-    class, and either one registered without a class fails registration at startup, naming the
-    tool or the operation. A test registers one tool and one service operation with no declared
+    class, and either one registered without a class fails registration at startup, naming what
+    was registered. A test registers one tool and one service operation with no declared
     class and asserts startup fails naming each. A second check starts the application under the
     production profile and asserts that its registration set contains no tool, operation,
     consumer, or identity provider registered by the test harness and no operation in the
