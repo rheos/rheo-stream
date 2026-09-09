@@ -1,0 +1,58 @@
+# Private state. Default runtime storage belongs outside the source checkout.
+/.rheo-local/
+/.secrets/
+/rheo.local.*
+
+# Private project instructions and local coding-agent configuration at any depth.
+AGENTS.md
+AGENTS.override.md
+CLAUDE.md
+CLAUDE.local.md
+.codex/
+.claude/
+.mcp.json
+
+# Environment values. Committed examples contain placeholders only.
+.env
+.env.*
+!.env.example
+!.env.*.example
+.envrc
+.envrc.local
+
+# Databases and SQLite journals/WAL/shared-memory files.
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Runtime and local agent artifacts.
+*.log
+.bureau/
+.bureau-worktrees/
+
+# Build, dependency, and test caches.
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage/
+htmlcov/
+dist/
+build/
+.next/
+
+# Local editor/OS state.
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
