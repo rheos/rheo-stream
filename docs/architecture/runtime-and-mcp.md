@@ -21,11 +21,11 @@ operation; no module constructs one.
 | Field | Meaning |
 | --- | --- |
 | `operation_id` | The durable operation this run belongs to. Every run is an operation. |
-| `actor`, `workspace_id`, `audience` | Copied from the context; the runtime may not change them. |
+| `actor`, `workspace_id`, `audience` | Copied from the originating operation record (a run inside a job carries the operation's actor and audience, not the worker's `system` actor); the runtime may not change them. The actor must have an account behind it, because the run-scoped token is issued to that account: an operation started by the operator or by a schedule cannot start a run and is refused `runtime_actor_required` before any adapter is invoked. |
 | `purpose` | From the purpose vocabulary; drives redaction and permission filtering. |
 | `task` | The instruction text, as data. Never interpolated into a shell command. |
 | `context_items` | List of `ContextItem(ref, tier, text)` already permission-checked and redacted by the context builder. |
-| `permitted_tools` | List of tool names. Derived from the actor's operation set intersected with the operation's declared tool needs; never wider than the actor. |
+| `permitted_tools` | List of MCP tool names, the adapter's allow list. Derived from the operation's declared tool needs intersected with the tools whose operations the originating actor may call; never wider than the actor. The [run-scoped token](#the-run-scoped-token) holds the *operations* these tools name, not the tool names. |
 | `output` | `text`, `structured(json_schema)`, or `stream`. |
 | `requirements` | Set of capability names the workflow needs (below). |
 | `limits` | `deadline_seconds` (default and ceiling `runtime.max_deadline_seconds`, package default 600, floor `min`), `max_iterations` (default 40), `max_output_bytes`. |
@@ -88,20 +88,30 @@ Switching runtimes starts a new native session with the selected authorized cont
 is carried across adapters. Completed effects are never replayed because effects are external
 actions with their own records, not part of the transcript.
 
+### The run-scoped token
+
+Every run reaches the deployment's tools through the MCP surface with a token of kind `runtime`,
+issued by the core's `runtime` package through `core.token.issue` (never by the adapter, which
+opens no database) on behalf of the originating actor: `account_id` is the account behind that
+actor, `issued_from = runtime`, `purpose` the run's, `expires_at` the run's deadline, and the
+snapshot is the operations the run's `permitted_tools` name, intersected with the originating
+actor's own permitted set and stripped of the non-token-issuable set
+([tokens](identity-and-topology.md#what-a-token-can-never-carry-and-what-it-holds-for-a-gated-operation)).
+The permitted set is therefore enforced by the facade on every call, not only by an adapter's
+allow list, and tool outputs are rendered under the run's purpose. The token and its snapshot
+rows are deleted when the run ends; `runtime_request.permitted_tools` keeps what the run could
+reach.
+
 ### What the core records about a run
 
-| `core.runtime_request` column | Meaning |
-| --- | --- |
-| `id`, `operation_id`, `runtime_id`, `model_id`, `purpose` | |
-| `context_refs text[]`, `context_digest bytea` | Which references were sent and a digest of the redacted text. Not the text. |
-| `permitted_tools text[]`, `requirements text[]`, `limits` columns | |
-| `terminal_event text`, `failure_kind null`, `usage_*` columns, `usage_kind` | |
-| `started_at`, `ended_at` | |
+| Table | Columns | Notes |
+| --- | --- | --- |
+| `core.runtime_request` | `id`, `operation_id`, `runtime_id`, `model_id`, `purpose`, `context_digest bytea`, `permitted_tools text[]`, `requirements text[]`, `deadline_seconds`, `max_iterations`, `max_output_bytes`, `terminal_event text`, `failure_kind null`, `usage_input_tokens null`, `usage_output_tokens null`, `usage_cost null`, `usage_kind null`, `started_at`, `ended_at null` | One row per run. `context_digest` is a digest of the redacted text, never the text. `permitted_tools` and `requirements` stay arrays because nothing queries them. |
+| `core.runtime_request_context` | `request_id`, `ref text` | Primary key both columns. Which references the run was sent; a child table because the [deletion cascade](deletion-export-migration.md#the-cascade) queries it to find the transcripts of every run whose context named an erased record. |
+| `core.runtime_transcript` | `id`, `request_id`, `ordinal integer`, `kind text`, `body text`, `byte_length integer`, `recorded_at`, `retention_until timestamptz` | `kind` in `model_output`, `tool_result_summary`, `progress`. `retention_until` is `recorded_at` plus `runtime.transcript_retention_days` (default 90, floor `min`); `core.retention_sweep` removes rows past it. Rows for a run whose context named a deleted record are removed by the deletion cascade at once, because a transcript can restate what the model was shown. |
 
-Transcripts (model output and tool result summaries) go to `core.runtime_transcript` with
-`retention_until` set from `runtime.transcript_retention_days` (default 90, floor `min`); the
-retention sweep job removes them. No secret value or reference, no tool argument, and no raw
-context text is in either table (criterion 17).
+No secret value or reference, no tool argument, and no raw context text is in any of the three
+tables (criterion 17).
 
 ## `ClaudeCliRuntime`
 
@@ -113,10 +123,12 @@ and uses that program's own agent loop.
 | Executable | `runtime.claude_cli.executable`, a deployment setting (absolute path); never from a workspace setting or a request. Missing or non-executable at spawn is `executable_unavailable`. |
 | Arguments | A fixed list: `-p`, `--output-format stream-json`, `--verbose`, `--max-turns <max_iterations>`, `--mcp-config <generated file>`, `--allowedTools <permitted tool names>`, `--resume <native_handle>` when continuing. No argument is built from task text. |
 | Task input | Written to the child's stdin as data. |
-| Tools | The adapter writes a per-run MCP configuration file pointing at this deployment's MCP endpoint with a **run-scoped token**: an `access_token` of kind `mcp`, `issued_from = runtime`, whose operation set is exactly `permitted_tools`, whose `purpose` is the run's, valid for the run's deadline, revoked at run end. The permitted set is therefore enforced by the facade on every call, not only by the CLI's allow list, and tool outputs are redacted under the run's purpose. |
+| Tools | The adapter writes a per-run MCP configuration file pointing at this deployment's MCP endpoint with the [run-scoped token](#the-run-scoped-token) the core handed it, and passes `permitted_tools` as the executable's allow list. The facade enforces the token's snapshot on every call, so the allow list is a convenience and the token is the boundary. |
 | Working directory | `<data_root>/workspaces/<id>/runs/<operation_id>/`, created empty, removed after the run. The parent development workspace is never the working directory. |
 | Configuration directory | `<data_root>/workspaces/<id>/runtime/claude-cli/`, passed as the executable's configuration-directory variable (`CLAUDE_CONFIG_DIR`) and as `HOME`, so that everything the executable writes by convention (its session files among them) lands under the data root and nowhere else. It is per workspace, not per run, because `continuation` resumes a native session from a later operation; a per-run directory would lose it. The retention sweep removes files in it older than `runtime.transcript_retention_days`. |
-| Environment | An allowlist: locale, path, the two directory variables above, and the variables the executable needs for its own credential; the model credential comes from the `credential_slot` mapping in the adapter's private configuration, resolved through the adapter's secret scope, and is passed in the child environment only. |
+| Credential and seeding | `runtime.claude_cli.credential_kind`, a deployment setting, is `login` or `api_key`; the package default is `login`, the personal self-host arrangement release one targets. With `login`, the operator completes the executable's interactive login once on the host into `runtime.claude_cli.login_seed_dir` (a directory under the data root, mode 0700), and the adapter **seeds** each workspace's configuration directory by copying that directory into it the first time the workspace runs; a missing or empty seed directory is `credential_invalid` at spawn, before any process starts. With `api_key`, the `model` credential slot maps to a secret reference in the adapter's private configuration, resolved through the adapter's secret scope and passed in the child environment as the executable's own credential variable, and the configuration directory is created empty. Either way nothing about the credential enters the request, the operation record, or the transcript (criterion 17). A hosted edition never uses `login` ([later phases](later-phases.md#phase-8-the-hosted-edition)). |
+| Environment | An allowlist: locale, path, the two directory variables above, and, under `api_key`, the executable's credential variable. Nothing else from the host environment reaches the child. |
+| Capability vector | `tool_calling = true`, `structured_output = true` (the adapter validates the final output against the request's schema itself and fails `output_invalid`), `streaming = true`, `continuation = true`, `cancellation = true` (the process group is killed on the token), `usage_reporting = exact`, `isolation = advisory`. Criterion 15's gate runs against this vector: a request requiring `isolation = enforced` is the one release-one requirement it cannot meet. |
 | Isolation | Reports `advisory` in release one: the adapter constrains the working directory and the tool allow list but cannot enforce a filesystem or network sandbox on its own. Workflows requiring `enforced` are refused on it until an operator-provided sandbox is configured. |
 | Deadline | A timer kills the process group at `deadline_seconds`; `deadline_exceeded`. |
 | Stream parsing | One JSON object per line. A process exit with no terminal `result` object is `stream_truncated`. An authentication error object is `credential_invalid`. A tool refusal from the facade surfaces as `tool_result(refused)` and, if the run cannot proceed, `tool_denied`. |
@@ -149,12 +161,15 @@ Inputs pass through the redaction contract with purpose `internal_analysis`.
 ## The MCP facade
 
 `apps/mcp`, served by the `core` process over streamable HTTP at the `mcp` surface (subdomain
-mode `mcp.<base>/`; path mode `/mcp`). Bearer token only; cookies are ignored on this surface.
+mode `mcp.<base>/`; path mode `/mcp`). Bearer token only, of kind `mcp` or `runtime`; a `cli`
+token is refused `token_wrong_kind`, and cookies are ignored on this surface
+([presentation](identity-and-topology.md#tokens-for-cli-and-mcp-fr-4)).
 
 **Session resolution.** The token resolves to an `access_token` row, and the boundary builds the
 `WorkspaceContext` from it: workspace, actor `token`, role from the token's account membership,
-`operation_set` from the token, `audience = token`. A malformed, expired, revoked, or wrong-kind
-token is refused at the transport with a distinct state and no tool runs (criterion 9).
+`operation_set` from the token's snapshot rows, `audience = token`. A malformed, wrong-kind,
+expired, revoked, or scope-invalid token is refused at the transport with a distinct state and
+no tool runs (criterion 9).
 
 **Listing.** `tools/list` returns the registered tools whose operation is in the token's operation
 set and whose module is enabled in the workspace, filtered again on every `tools/call`, so a tool
@@ -179,11 +194,13 @@ listed before a revocation is refused after it (idea document: discovery grants 
 **No SQL, no repository.** A tool has no handler; `apps/mcp` imports the service registry and the
 contracts and nothing from `rheo_core.storage` or any driver (criterion 20).
 
-**Approvals are never given through MCP.** The token kinds differ: `mcp` tokens cannot carry
-`core.approval.*` in their operation set (issuance refuses), so a model cannot approve what it
-proposed. Approval happens in the web interface or through a `cli` token in a person's hands
-(R3 item 8). A tool may *request* an approval on behalf of the actor, which is what
-`approval_required` is.
+**Approvals are never given through MCP.** No token of any kind can carry `core.approval.*`:
+the operations are non-token-issuable, refused at issuance and again at presentation
+([tokens](identity-and-topology.md#what-a-token-can-never-carry-and-what-it-holds-for-a-gated-operation)),
+so there is no MCP session in which the approval operation exists, and a model cannot approve
+what it proposed. Approval happens in the web interface (R3 item 8). A tool may *request* an
+approval on behalf of the actor, which is what `approval_required` is, and a destructive tool in
+a token's set is that request right and nothing more.
 
 **Release-one tool set.** Each names one operation and restates its class and roles; the
 operation tables in the module documents are authoritative.
@@ -243,7 +260,9 @@ looser than on what it was made from (criterion 28).
 
 ### Retention and control
 
-- The core stores context references and a digest, and transcripts for the retention period.
+- The core stores context references and a digest, and transcripts for the retention period or
+  until a record the run was shown is deleted, whichever comes first
+  ([the cascade](deletion-export-migration.md#the-cascade)).
   The provider's copy is outside the deployment's control, and the documentation says so rather
   than claiming otherwise. The CLI's local files are directed under the data root by the
   per-workspace configuration directory and swept with the transcripts; the contract claims only

@@ -29,7 +29,7 @@ All in the `leads` schema. Every table has `id uuid` (UUIDv7) unless noted.
 | --- | --- | --- |
 | `funnel` | `name text`, `description text`, `created_at`, `archived_at null` | Acquisition context: a site, an event, a referral programme. |
 | `campaign` | `funnel_id`, `name text`, `created_at`, `archived_at null` | Optional refinement of a funnel. |
-| `intake_connection` | `name`, `transport text`, `source_namespace text unique`, `mapping_id`, `mapping_version integer`, `funnel_id`, `campaign_id null`, `priority integer`, `subject_authenticated boolean`, `email_verified boolean`, `signing_secret_ref text null`, `signing_key_generation integer`, `previous_secret_ref text null`, `previous_valid_until timestamptz null`, `state text`, `created_at`, `revoked_at null` | `transport` in `webhook`, `import`, `manual`. `state` in `active`, `needs_credential`, `revoked`. `source_namespace` is a URI (`urn:rheo:connection:<uuid>`) used as the CloudEvents `source`. `subject_authenticated` and `email_verified` are the operator's declaration of what this source proves, which R4 needs. `signing_key_generation` starts at 1 and increments on every rotation; it is the only rotation mechanism (see [transports](#transports)). |
+| `intake_connection` | `name`, `transport text`, `source_namespace text unique`, `mapping_id`, `mapping_version integer`, `funnel_id null`, `campaign_id null`, `priority integer`, `subject_authenticated boolean`, `email_verified boolean`, `signing_secret_ref text null`, `signing_key_generation integer`, `previous_secret_ref text null`, `previous_valid_until timestamptz null`, `state text`, `created_at`, `revoked_at null` | `transport` in `webhook`, `import`, `manual`. `state` in `active`, `needs_credential`, `revoked`. `source_namespace` is a URI (`urn:rheo:connection:<uuid>`) used as the CloudEvents `source`. `funnel_id` is null only on the `manual` connection, where each capture names its funnel (check constraint). `subject_authenticated` and `email_verified` are the operator's declaration of what this source proves, which R4 needs. `signing_key_generation` starts at 1 and increments on every rotation; it is the only rotation mechanism (see [transports](#transports)). |
 | `connection_health` | `connection_id pk`, `last_accepted_at`, `last_processed_at`, `pending_count`, `unresolved_failures integer`, `last_error text null`, `lag_seconds integer` | Maintained by the intake worker; read by `leads.connection.health` (FR 38). |
 | `field_mapping` | `id`, `version integer`, `name`, `source_kind text`, `state text` | `source_kind` in `json`, `csv`. Primary key `(id, version)`. Versions are immutable once a receipt pins them. |
 | `field_mapping_identity` | `mapping_id`, `version`, `event_id_path`, `occurred_at_path`, `subject_id_path null`, `verified_email_path null` | Where identity lives in a payload. Paths are JSON Pointers for JSON, column names for CSV. |
@@ -38,10 +38,10 @@ All in the `leads` schema. Every table has `id uuid` (UUIDv7) unless noted.
 | `routing_condition` | `rule_id`, `field text`, `op text`, `value text null` | All conditions of a rule must hold. `op` in `present`, `absent`, `equals`, `contains`. |
 | `delivery_receipt` | `id`, `connection_id`, `source_event_id text`, `content_digest bytea`, `byte_length integer`, `transport text`, `received_at`, `source_occurred_at null`, `mapping_id`, `mapping_version`, `signing_key_generation integer null`, `state text`, `state_detail text null`, `processed_at null` | **Unique `(connection_id, source_event_id)`.** `state` in `pending`, `processed`, `refused`; a duplicate never inserts a receipt, so there is no duplicate state. `signing_key_generation` is the connection generation whose secret verified the signature, null for the import and manual transports. `state_detail` holds `observation_deleted` after R5 deletion. The receipt survives observation deletion holding identifier, digest, length, and timestamps only (R5). |
 | `delivery_payload` | `receipt_id pk`, `body bytea`, `content_type text`, `byte_length integer` | The bounded source copy (FR 36). Deleted with the observation; the receipt's digest remains. |
-| `delivery_conflict` | `id`, `receipt_id`, `kind text`, `content_digest bytea`, `byte_length integer`, `received_at`, `body bytea null`, `body_retention_until timestamptz null`, `resolved_at null`, `resolution text null` | `kind` in `digest_differs` (FR 34, criterion 45) and `deleted_observation` (a re-delivery of a deleted observation's event, criterion 65). **A `deleted_observation` conflict never stores `body`**: digest, length, and timestamps only, so a retrying sender cannot land an erased person's payload back. A `digest_differs` body is review material with bounded retention: `body_retention_until = received_at + intake.conflict_body_retention_days` (package default 30, floor `min`); the retention sweep nulls `body` past it, and R5 deletion of the observation nulls it at once ([deletion](deletion-export-migration.md#the-cascade)). |
+| `delivery_conflict` | `id`, `receipt_id`, `kind text`, `content_digest bytea`, `byte_length integer`, `received_at`, `body bytea null`, `resolved_at null`, `resolved_by_id null`, `resolution_note text null` | `kind` in `digest_differs` (FR 34, criterion 45) and `deleted_observation` (a re-delivery of a deleted observation's event, criterion 65). **A `deleted_observation` conflict never stores `body`**: digest, length, and timestamps only, so a retrying sender cannot land an erased person's payload back. A `digest_differs` body is review material, held for exactly as long as the conflict is open: `leads.conflict.resolve` nulls it as it sets `resolved_at`, and R5 deletion of the observation nulls it at once ([deletion](deletion-export-migration.md#the-cascade)). There is no scheduled expiry of a conflict body, because R5 permits none beyond the memory retention setting; an open conflict is an unresolved failure on the connection's health until a person resolves it. |
 | `observation` | `id`, `receipt_id unique`, `connection_id`, `funnel_id`, `campaign_id null`, `transport text`, `source_event_id text`, `external_subject_id text null`, `verified_email text null`, `source_occurred_at`, `received_at`, `mapping_version integer`, `completeness integer`, `party_ref text null`, `created_at` | The normalized evidence record (FR 39). `party_ref` is a record reference into `relationships`, nulled on party deletion. `verified_email` is set only when the connection declares `email_verified`. |
 | `observation_field` | `observation_id`, `target text`, `value_kind text`, `value_text text null`, `source_path text`, `transform text null`, `mapping_version integer` | Per-field provenance (FR 36). `value_kind` in `value`, `cleared`. Primary key `(observation_id, target)`. |
-| `import_batch` | `id`, `connection_id`, `file_ref`, `row_count`, `accepted`, `refused`, `state`, `created_at` | One per CSV or JSON import. |
+| `import_batch` | `id`, `connection_id`, `file_ref`, `row_count`, `accepted`, `refused`, `state`, `state_detail text null`, `created_at`, `finished_at null` | One per CSV or JSON import. `state` in `queued`, `running`, `completed`, `refused` (the whole file, before any row, with the first missing column in `state_detail`), `failed`. |
 
 ### The observation envelope
 
@@ -96,7 +96,7 @@ unknown target refuses the mapping version at save time, not at delivery time.
      transport acknowledges as it would a fresh accept, because the sender's retry succeeded
      the first time.
    - Not inserted, digest differs: insert a `delivery_conflict` of `kind = digest_differs` with
-     the body under bounded retention, increment `unresolved_failures`, return `conflict`. The
+     the body, held until the conflict is resolved, increment `unresolved_failures`, return `conflict`. The
      transport acknowledges (the delivery was durably recorded) and the conflict is visible on
      the connection (FR 34, criterion 45). The existing observation is not touched.
 4. **Store payload** in `delivery_payload`.
@@ -161,22 +161,54 @@ the current value:
 A new observation may write a field only when all hold: `owner = source`; the observation's
 `occurred_at` is not older than the current one; and, when `occurred_at` is equal, the
 observation's `completeness` is not lower and its connection `priority` is not lower. A thinner
-or older observation therefore never overwrites (criterion 47); a user-set stage or note is
-`owner = user` and survives everything (criterion 49); a `cleared` fact overwrites under the same
-rule and is distinguishable from absence (criterion 48). The observation itself is stored
-regardless, so nothing is lost, only not applied.
+or older observation therefore never overwrites (criterion 47); a user-set field is `owner =
+user` and survives everything, and a user-set stage and a note live in columns intake never
+writes (`opportunity.stage_id` and
+[`opportunity_note`](confirmation-and-safety.md#opportunities-parties-qualifications-and-handoffs)),
+which is criterion 49; a `cleared` fact overwrites under the same rule and is distinguishable
+from absence (criterion 48). The observation itself is stored regardless, so nothing is lost,
+only not applied.
+
+**After an observation is deleted.** The Leads owning delete removes the field-state rows whose
+`observation_id` is the erased observation, then re-derives each affected `(opportunity_id,
+target)` from the opportunity's remaining observations (`opportunity_observation`, the erased
+one excluded) by applying the rule above to them in `occurred_at` order, inside the deletion's
+transaction ([the cascade](deletion-export-migration.md#the-cascade)). A target with no
+remaining evidence stays absent; `owner = user` rows name no observation and are untouched. The
+opportunity therefore shows what its surviving evidence supports and nothing the erased record
+alone supported.
 
 ### Transports
 
-**Signed webhook.** `POST /api/v1/intake/webhook/<connection_id>` on the `api` surface. Headers:
-`X-Rheo-Timestamp` (Unix seconds), `X-Rheo-Signature` (`v1=<hex HMAC-SHA256 of
-"<timestamp>.<body>">`), optional `X-Rheo-Event-Id`. The receiver resolves the connection by path
-id, resolves the signing secret through its own secret scope, refuses when the timestamp is
-outside `intake.replay_window_seconds` (default 300), verifies the signature in constant time
-against the current secret and, while `previous_valid_until` is in the future, the previous one,
-records which generation matched on the receipt, and only then builds the `WorkspaceContext`
-from the connection and calls `accept_delivery`. A signature failure returns `401` with no
-receipt and counts an unresolved failure on the connection (criterion 42). The connection id in
+The Leads manifest declares one `ConnectorBinding` per transport, and every binding names the
+same operation:
+
+| Transport | Binding | Actor when `accept_delivery` runs |
+| --- | --- | --- |
+| `webhook` | Route `POST /api/v1/intake/webhook/<connection_id>` on the `api` surface, calling `leads.intake.accept_delivery` | A `connection` actor, role `service`, built after the signature verified |
+| `import` | No route. The `leads.import.run` job hands each row to the import connector, which calls `leads.intake.accept_delivery` | The job's `system` actor, role `service` |
+| `manual` | No route. `leads.intake.capture` hands the form to the manual connector, which calls `leads.intake.accept_delivery` | The capturing account, in its own context |
+
+**Signed webhook.** Headers: `X-Rheo-Timestamp` (Unix seconds), `X-Rheo-Signature` (`v1=<hex
+HMAC-SHA256 of "<timestamp>.<body>">`), optional `X-Rheo-Event-Id`. The receiver runs these
+steps in this order, and stops at the first that fails:
+
+1. Resolve the connection by the path id. Unknown: `401`, nothing recorded. Known and not
+   `active`: `401`, no receipt, an unresolved failure counted on that connection. The state is
+   checked **before** any signature work, so a revoked connection refuses even a correctly
+   signed delivery.
+2. Refuse a timestamp outside `intake.replay_window_seconds` (default 300) the same way.
+3. Resolve the signing secret through the receiver's own secret scope and verify the signature
+   in constant time against the current secret and, while `previous_valid_until` is in the
+   future, the previous one. A failure is `401`, no receipt, no acknowledgement, and an
+   unresolved failure counted (criterion 42).
+4. Record which generation matched, build the `WorkspaceContext` from the connection, and call
+   `accept_delivery`.
+
+The failure count is the one Leads write that happens before a context exists: the route handler
+increments `connection_health.unresolved_failures` and sets `last_error` in its own short
+transaction, keyed by the path id, because an unauthenticated request has no actor to dispatch
+for, and criterion 42 wants the refusal visible on that connection's health. The connection id in
 the path is a lookup key, not authorization; the signature is.
 
 **Rotation and revocation** are connection-level and there is no other mechanism.
@@ -187,8 +219,11 @@ new secret under a new reference, moves the old reference to `previous_secret_re
 `signing_key_generation`. `leads.connection.revoke_secret` sets `previous_secret_ref` null and
 `previous_valid_until` null at once, and `leads.connection.revoke` sets the connection `revoked`.
 From that moment a delivery signed with the old secret fails at the receiver, and a receipt
-already accepted under the old generation fails at processing step 1, which is the pair criterion
-42 tests.
+already accepted under the old generation fails at processing step 1. Criterion 42's test calls
+`leads.connection.rotate_secret` with `overlap_seconds = 0` for the rotation case and
+`leads.connection.revoke` for the revocation case; in each, the delivery accepted before the call
+is refused at processing with no observation, the delivery signed with the old secret afterward
+is refused at the receiver with no receipt, and both count on the connection's health.
 
 **CSV and JSON import.** An owner uploads a file against a connection with `transport = import`.
 The importer streams rows, derives each row's `source_event_id` from `event_id_path` (for CSV a
@@ -197,11 +232,17 @@ A file whose columns do not match the mapping version's rules is refused whole, 
 missing column, before any row is accepted (criterion 39).
 
 **Manual capture.** A form on the Leads surface and the `leads_capture` tool. Each workspace has
-one connection with `transport = manual`, created at Leads enable. The capture must name a
-funnel from the workspace's funnels; a capture with none is refused before a receipt exists
-(criterion 40). The core generates the `source_event_id` (a UUIDv7) and the capture goes through
-`accept_delivery` and processing like any delivery, so criterion 39's "identical apart from
-transport" holds by construction.
+one connection with `transport = manual`, created at Leads enable with `funnel_id` null,
+`priority` 100, both evidence flags false, and the package mapping `manual_capture` version 1,
+also written at enable: its identity paths are `/event_id` and `/occurred_at`, and its rules map
+each core fact name to the JSON Pointer of the same name in the capture body (`/person.email`
+to `person.email`, and so on) with no transform beyond `trim` and the two normalizers. Extension
+values a person enters on the form are applied by `leads.opportunity.update` after routing, with
+`owner = user`, not by the mapping, so the seeded mapping never needs a new version. The capture
+must name a funnel from the workspace's funnels; a capture with none is refused before a receipt
+exists (criterion 40). The core generates the `source_event_id` (a UUIDv7) and the capture goes
+through `accept_delivery` and processing like any delivery, so criterion 39's "identical apart
+from transport" holds by construction.
 
 ## Part two: events, durable work, operations, audit
 
@@ -293,7 +334,8 @@ their `data` fields, each declared as a model in the owning manifest:
 | `leads.opportunity.transitioned` | `opportunity_ref`, `from_stage_id`, `to_stage_id`, `outcome null` |
 | `leads.opportunity.migrated` | `opportunity_ref`, `from_version`, `to_version` |
 | `leads.handoff.requested` | `handoff_ref`, `opportunity_ref`, `purpose`, `destination_ref null`, `state` |
-| `leads.contact_permission.withdrawn` | `party_ref`, `purpose`, `channel` |
+| `leads.contact_permission.withdrawn` | `party_ref`, `purpose`, `channel null` |
+| `leads.contact_permission.suppressed` | `party_ref` |
 | `relationships.party.merged`, `.unmerged` | `survivor_ref`, `merged_ref`, `merge_record_ref` |
 | `recallatron.memory.recorded`, `.invalidated` | `memory_ref`, `kind`, `reason null` |
 | `core.record.deleted` | `ref`, `deletion_record_ref` |
@@ -330,13 +372,13 @@ interval:
 The same loop serves event deliveries, using the delivery table instead of the job table.
 Restart recovery is the expired-lease path and nothing else.
 
-The core declares two scheduled jobs of its own, created for every workspace at provisioning:
+The core declares one scheduled job of its own, created for every workspace at provisioning:
 `core.retention_sweep` (daily), which removes runtime transcripts and `ClaudeCliRuntime` session
-files past `runtime.transcript_retention_days`, outbox rows past `work.outbox_retention_days`,
-idempotency results past `operations.idempotency_retention_days`, and conflict bodies past
-`body_retention_until`; and `core.exports.sweep`, enqueued by the deletion coordinator when an
-artifact could not be removed ([deletion](deletion-export-migration.md#the-cascade)). Module
-sweeps (the memory retention sweep) are the module's own schedules.
+files past `runtime.transcript_retention_days` and outbox rows past
+`work.outbox_retention_days`. `core.exports.sweep` is a job kind and never a schedule: the
+deletion coordinator enqueues it when an artifact could not be removed
+([deletion](deletion-export-migration.md#the-cascade)), and the job table's attempts and backoff
+are its retry. Module sweeps (the memory retention sweep) are the module's own schedules.
 
 ### Operations (FR 17)
 
@@ -366,7 +408,6 @@ idempotency nor status lookup. It is listed by `core.work.failures` and cleared 
 | `actor_kind`, `actor_id`, `entry` | From the context. |
 | `operation_name`, `safety_class`, `operation_id null` | What ran. |
 | `subject_ref text null` | From the operation's `AuditSpec`. |
-| `idempotency_key text null` | For `KEYED` operations. |
 | `request_digest bytea` | SHA-256 of the canonical input, so "what exactly was requested" is answerable without storing the input. |
 | `outcome text` | `succeeded`, `failed`, `refused`. |
 
@@ -377,20 +418,19 @@ with no `AuditSpec` (criterion 14). `core.audit.list` (owner only) is the suppor
 row holds no secret and no reference to one, by the same rule that keeps them out of operation
 records ([secrets](storage-and-workspaces.md#a4-the-secret-store-fr-13-guardrail-14)).
 
-### Idempotent results
+### Idempotency
 
-An operation declared `KEYED(field)` must return the same output on a repeat, which the audit row
-cannot do because it holds a digest and no output. The dispatcher writes
-`core.idempotency_result(operation_name text, key text, output jsonb, recorded_at,
-retained_until)`, primary key `(operation_name, key)`, in the operation's transaction, and on a
-repeat within `retained_until` (`operations.idempotency_retention_days`, package default 30)
-returns `output` without running the handler. `output` is the serialised output model and is
-never queried, the one JSON use the house rule allows. KEYED outputs are references and scalars
-by convention (the phase-five `current.work.create_from_handoff` returns `{ work_ref }`), and the
-dispatcher refuses to record an output above `operations.idempotency_output_max_bytes` (default
-65536) by failing the call before commit, so a builder finds an oversized output in the test
-suite and not in production. After retention a repeat runs again as a new request; the document
-says so rather than promising forever.
+Release one has natural idempotency only. An operation declared `NATURAL` names the unique index
+under which a repeat is the same row, and its handler returns that row on a repeat:
+`leads.intake.accept_delivery` on `(connection_id, source_event_id)` (the branch table above),
+`leads.handoff.request` on `(opportunity_id, idempotency_key)`
+([handoffs](confirmation-and-safety.md#the-handoff-operation-fr-45-criterion-64)), and
+`relationships.party.resolve_or_create` through the per-receipt consumer dedup. There is no
+keyed idempotency and no stored-result table, because nothing in release one must return a
+*created* reference on a retry whose natural key does not already carry the answer. Phase five's
+`current.work.create_from_handoff` is the first operation that must, and `KEYED` idempotency
+with its result table and retention setting arrive with it
+([later phases](later-phases.md#phase-5-the-work-in-motion-module)).
 
 ### External actions
 
@@ -413,24 +453,39 @@ otherwise sets `unresolved`.
 
 ## Contact permission records (FR 46)
 
-Leads owns `leads.contact_permission`, separate from any observation:
+Leads owns two tables, separate from any observation:
 
-| Column | Meaning |
-| --- | --- |
-| `id`, `party_ref`, `purpose text`, `channel text`, `recipient_scope text` | `purpose` from the closed vocabulary `respond`, `follow_up`, `share_with_referral`, `internal_analysis`; `channel` in `email`, `phone`, `message`; `recipient_scope` in `workspace`, `named_referral`. |
-| `disclosure_version text`, `evidence_observation_id null`, `granted_at`, `granted_by_kind`, `granted_by_id` | Where the permission came from. An observation's evidence becomes a permission only through `leads.contact_permission.record`, a mutate-class operation a person or a routing rule invokes explicitly; recording an inbound submission creates no permission by itself (criterion 62). |
-| `withdrawn_at null`, `withdrawn_reason text null`, `suppressed boolean` | Withdrawal and suppression. |
+| Table | Columns | Notes |
+| --- | --- | --- |
+| `contact_permission` | `id`, `party_ref`, `purpose text`, `channel text null`, `recipient_scope text`, `disclosure_version text null`, `evidence_observation_id null`, `granted_at null`, `granted_by_kind null`, `granted_by_id null`, `withdrawn_at null`, `withdrawn_reason text null`, `withdrawn_by_kind null`, `withdrawn_by_id null` | `purpose` from the closed vocabulary `respond`, `follow_up`, `share_with_referral`, `internal_analysis`; `channel` in `email`, `phone`, `message`, or null meaning every channel; `recipient_scope` in `workspace`, `named_referral`. A row is one of three things: a grant (`granted_at` set), a grant later withdrawn (both set), or **a withdrawal with no prior grant** (`granted_at` null, `withdrawn_at` set), which is the common form of edge case 16 and is a record in its own right. An observation's evidence becomes a grant only through `leads.contact_permission.record`, a mutate-class operation a person or a routing rule invokes explicitly; recording an inbound submission creates no permission by itself (criterion 62). |
+| `contact_suppression` | `party_ref pk`, `suppressed_at`, `reason text null`, `suppressed_by_kind`, `suppressed_by_id` | The person asked never to be contacted, for any purpose on any channel. One row per party; a second `suppress` updates it. |
 
-`leads.contact_permission.check(party_ref, purpose, channel null)`, read class, roles `owner`,
-`member`, `service`, resolves `party_ref` to its canonical party and returns one of `permitted`
-(a live record for the purpose and, when given, the channel), `absent` (no record), `withdrawn`,
-or `suppressed`. The two callers read it differently on purpose: the `ContactPermissionGuard`
-on external actions requires `permitted`
+The operations, all with roles `owner`, `member` so that a member handling an inquiry can act
+without waiting for the owner:
+
+- `leads.contact_permission.record(party_ref, purpose, channel null, recipient_scope,
+  disclosure_version, evidence_observation_id null)`, mutate: writes a grant row.
+- `leads.contact_permission.withdraw(party_ref, purpose, channel null, reason)`, mutate: sets
+  `withdrawn_*` on every live grant row for the purpose and channel (a null channel withdraws
+  every channel), and **when no grant row exists it inserts a row with `granted_at` null and
+  `withdrawn_at = now()`**, so a withdrawal by a person who never granted anything is recorded
+  rather than silently ignored and `check` returns `withdrawn` from then on. Publishes
+  `leads.contact_permission.withdrawn`.
+- `leads.contact_permission.suppress(party_ref, reason)`, mutate: writes or updates the
+  `contact_suppression` row. Publishes `leads.contact_permission.suppressed`.
+- `leads.contact_permission.check(party_ref, purpose, channel null)`, read, roles `owner`,
+  `member`, `service`: resolves `party_ref` to its canonical party and every alias
+  (`relationships.party.aliases`), so a record written against a party before a merge still
+  counts, and returns the first that holds: `suppressed` (a suppression row for any of them);
+  `withdrawn` (the newest permission row for the purpose whose channel is the requested one or
+  null has `withdrawn_at` set); `permitted` (a grant row for the purpose and channel with
+  `withdrawn_at` null); `absent` (no row at all).
+
+The two callers read the result differently on purpose: the `ContactPermissionGuard` on external
+actions requires `permitted`
 ([confirmation and safety](confirmation-and-safety.md#execution-guards)), while the memory
 module's retrieval filter drops a memory on `withdrawn` or `suppressed` and not on `absent`
-([memory](memory.md#retrieval-fr-27-fr-30-criteria-27-and-31)). `leads.contact_permission.record`
-and `.withdraw` are mutate class, roles `owner`, `member`: a member handling an inquiry records
-the permission the person gave and honours a withdrawal without waiting for the owner.
+([memory](memory.md#retrieval-fr-27-fr-30-criteria-27-and-31)).
 
 **The purpose vocabulary is a closed enum** in `packages/contracts` in release one: `respond`,
 `follow_up`, `share_with_referral`, `internal_analysis`. Modules cannot extend it and no setting

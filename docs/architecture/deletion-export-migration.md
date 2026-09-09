@@ -24,14 +24,23 @@ which the one-database-per-workspace layout makes possible without a distributed
 1. **Guards.** The approval is rechecked (window, both actors); the record must still exist at
    the approved revision.
 2. **Owning module.** The owner's registered `delete(ref)` removes the record and every row it
-   owns for that record (an observation's fields and payload, its `opportunity_observation`
-   rows, and the `opportunity_field_state` rows that name it as their evidence, so no value whose
-   only evidence was the erased observation stays on an opportunity; an opportunity's field
-   state, observation links, party links, qualifications, drafts, handoffs and snapshots; a
-   party's contact points and affiliations; a memory's embeddings, links, and mentions) and
-   returns the set of references it removed. That set is normally the one reference; a party that is a merge
-   survivor also returns its alias rows, which it removes with it
-   ([relationships](relationships.md#deletion-r5)). Steps 3 to 6 run once per reference in the set.
+   owns for that record and returns the set of references it removed:
+   - an observation: its fields and payload, its `opportunity_observation` rows, and the
+     `opportunity_field_state` rows that name it as their evidence, after which Leads re-derives
+     each affected field from the opportunity's remaining observations in the same transaction
+     ([field derivation](intake-and-events.md#field-derivation-fr-37)), so no value whose only
+     evidence was the erased observation stays on an opportunity;
+   - an opportunity: its field state, notes, observation links, party links, qualifications,
+     drafts, handoffs and snapshots;
+   - a party: its contact points and affiliations, and the free-text `evidence` of every
+     `merge_record` that names it as survivor or merged (set null; `evidence_refs` stay), because
+     a reviewer's note about why two records were one person can restate that person
+     ([relationships](relationships.md#deletion-r5));
+   - a memory: its purposes, embeddings, links, and mentions.
+
+   That set is normally the one reference; a party that is a merge survivor also returns its
+   alias rows, which it removes with it ([relationships](relationships.md#deletion-r5)). Steps 3
+   to 6 run once per reference in the set.
 3. **Deletion participants.** Every module enabled in the workspace that declared a
    `DeletionParticipant` for the type runs its handler in the same transaction:
    - `recallatron.on_record_deleted`: run the memory module's one invalidation rule with reason
@@ -42,14 +51,18 @@ which the one-database-per-workspace layout makes possible without a distributed
      reference, so they remain as unlinked evidence (R5); set `opportunity_party.removed_at`
      for every link that named it.
    - `leads.on_observation_deleted`: keep the `delivery_receipt` row; delete its
-     `delivery_payload`; null `body` and `body_retention_until` on every `delivery_conflict`
-     row of that receipt; set the receipt's `state_detail = observation_deleted`.
+     `delivery_payload`; null `body` on every `delivery_conflict` row of that receipt; set the
+     receipt's `state_detail = observation_deleted`.
 4. **Core participants.** Queued jobs and pending external actions with
    `depends_on_ref = ref` (or whose destination is the deleted party) are set `cancelled`
    (criterion 65). Approvals bound to the reference go `invalidated` and their
-   `approval_payload` rows are deleted. Outbox rows are not touched, because event `data` never
-   carries personal content ([events](intake-and-events.md#events-and-the-outbox-fr-15)); only
-   references, which now resolve to `deleted`.
+   `approval_payload` rows are deleted. Every `runtime_transcript` row of a run whose
+   `runtime_request_context` names the reference is deleted, because a transcript can restate
+   what the model was shown; the `runtime_request` row stays, holding references and a digest
+   ([runtime](runtime-and-mcp.md#what-the-core-records-about-a-run)). Outbox rows are not
+   touched, because event `data` never carries personal content
+   ([events](intake-and-events.md#events-and-the-outbox-fr-15)); only references, which now
+   resolve to `deleted`.
 5. **Held exports.** Every `export_record` whose `export_record_ref` rows include the reference is
    marked `state = removed_by_deletion` with `removed_at` and the deletion record id.
 6. **Deletion record.** `core.deletion_record` is written.
@@ -78,10 +91,12 @@ record resolver returns `state = deleted` for the reference from this table.
 
 ### Deletion is not withdrawal
 
-`leads.contact_permission.withdraw(party_ref, purpose, channel)` sets `withdrawn_at` on the
-permission and leaves every record in place; queued actions fail closed at their guard and derived
-memory stops being retrievable for the purpose (criterion 61). `core.record.delete` removes the
-record and leaves permissions untouched. The interface offers them as two actions on a party with
+`leads.contact_permission.withdraw(party_ref, purpose, channel, reason)` sets `withdrawn_at` on
+the permission, or writes a withdrawal row when no permission was ever recorded
+([contact permission](intake-and-events.md#contact-permission-records-fr-46)), and leaves every
+record in place; queued actions fail closed at their guard and derived memory stops being
+retrievable for the purpose (criterion 61). `core.record.delete` removes the record and leaves
+permissions and suppressions untouched. The interface offers them as two actions on a party with
 two confirmations, and neither operation calls the other (FR 46, R5).
 
 ### Receipts and re-delivery

@@ -40,13 +40,27 @@ optional. The handoff operation from phase three
 registered destination: `leads.handoff.request` writes the record `pending` instead of
 `unavailable` and calls `current.work.create_from_handoff(handoff_ref, snapshot)`, the
 `EXTERNAL`-class execution with its own approval, `DestinationGuard`, and `external_action`
-record, with `KEYED` idempotency on the handoff reference so a retry after a lost response
-returns the created work reference from `core.idempotency_result` rather than creating a second.
-Leads writes the outcome into `handoff.state` and `result_ref` from the operation record and
-displays the work's state through the record resolver, never a second editable copy. If a preset
-then needs to name a destination, a `preset_handoff(preset_id, version, destination_ref)` table
-arrives in the same Leads migration; release one ships neither. Completing a task publishes
-`current.task.completed`, which no other module may treat as a domain outcome.
+record. That operation is the first in the system that must return a *created* reference on a
+retry whose natural key does not already carry the answer, so **keyed idempotency arrives
+here**: the `Idempotency` enum gains `KEYED(field)` (additive within contract version 1), the
+core gains `core.idempotency_result(operation_name, key, output, recorded_at, retained_until)`
+with its retention setting in a core migration, and the dispatcher stores and returns the output
+on a repeat. Release one carries none of it, because every release-one operation that can be
+retried is idempotent on a unique index it already has
+([idempotency](intake-and-events.md#idempotency)). Leads writes the outcome into
+`handoff.state` and `result_ref` from the operation record and displays the work's state through
+the record resolver, never a second editable copy. If a preset then needs to name a destination,
+a `preset_handoff(preset_id, version, destination_ref)` table arrives in the same Leads
+migration; release one ships neither. Completing a task publishes `current.task.completed`,
+which no other module may treat as a domain outcome.
+
+**A CI assertion changes here.** Criterion 18's production-profile check asserts, through phase
+three, that the registration set contains no external-class or financial-class operation. The
+destination execution is the first production external-class operation, so the phase-five plan
+must rewrite that assertion (to an explicit allow list of destination operations, or to an
+assertion over the registered destination set) rather than weaken it silently; the
+[overview](overview.md#known-tensions) records the tension so it is not mistaken for an
+oversight.
 
 **What it must not do.** Become invoicing or accounting; those remain the external back-office
 integration's.
@@ -64,8 +78,8 @@ audience_kind)`), builds a `WorkspaceContext` with `audience = channel:<conversa
 the same services. Group conversations and private conversations are different audiences, so a
 runtime session bound to one is never resumed for the other. Approval requests in a channel
 return the `approval_required` state as a message with the approval id; approval itself still
-happens through the web interface or the CLI, or through a channel-specific confirmation that is
-itself an authenticated action by the enrolled account and is recorded with `approved_entry =
+happens through the web interface, or through a channel-specific confirmation that is itself an
+authenticated action by the enrolled account (not a token) and is recorded with `approved_entry =
 channel`. Revocation of an enrollment revokes queued work bound to that audience.
 
 **What it must not do.** Give a channel any operation a web session lacks, or resume a global
@@ -102,9 +116,12 @@ it leaves settled:
   configuration is the single place hosts are named, so either answer is configuration plus a
   per-tenant resolver at the boundary.
 - **Storage scale.** Database-per-workspace on one cluster has a ceiling; the hosted edition
-  decides between more clusters (the `cluster` table already routes by `cluster_ref`) and a
-  different scheme behind the same seam. Pool caching and serial migration become real
-  engineering here.
+  decides between more clusters and a different scheme behind the same seam. A second cluster
+  arrives as a `control.cluster(cluster_ref, dsn_secret_ref, state)` table and a
+  `workspace.cluster_ref` column in a control-plane migration, replacing the single
+  `storage.cluster_dsn_ref` setting release one routes by
+  ([storage](storage-and-workspaces.md#the-control-plane)). Pool caching and serial migration
+  become real engineering here.
 - **Credentials.** Service-owned model credentials through an API adapter; never a customer's CLI
   subscription (idea document). The OpenRouter adapter from phase six is the candidate default.
 - **Encryption and keys.** Per-workspace encryption at rest and a key-management design with a

@@ -37,13 +37,13 @@ setting; the class-to-behaviour table is code, not configuration).
 | `actor_kind`, `actor_id` | Who requested (the actor whose call was gated). |
 | `operation_name`, `operation_id` | What. |
 | `destination_ref text null` | Recipient or destination: a party reference, a connector destination, the recording sink. Null only for destructive operations on a record, where `subject_ref` is the binding. |
-| `subject_ref text null` | The record acted on. |
+| `subject_ref text null`, `subject_revision integer null` | The record acted on, and its `RecordHead.revision` at the moment the approval was created, which `RecordStateGuard` compares at execution ([guards](#execution-guards)). |
 | `payload_digest bytea` | SHA-256 of the canonical JSON of the operation input as it will execute. |
 | `payload_ref` | The `core.approval_payload(approval_id pk, body jsonb, byte_length integer)` row holding the snapshot, so the interface can show what is being approved. `body` is never queried and is bounded by `approvals.max_payload_bytes` (default 65536). The row is deleted when its approval is invalidated by the [deletion cascade](deletion-export-migration.md#the-cascade), because a snapshot of a request about a deleted record is a copy of that record. |
 | `purpose text` | From the purpose vocabulary. |
 | `window_start`, `window_end` | Execution window. Default length `approvals.default_window_seconds` 900; maximum `approvals.max_window_seconds` 86400, floor `min`. |
 | `state` | `pending`, `approved`, `executed`, `expired`, `invalidated`, `refused`, `requires_reapproval`. |
-| `approved_by_kind`, `approved_by_id`, `approved_at`, `approved_entry` | Who approved and through which entry (`web` or `cli`; never `mcp`). |
+| `approved_by_kind`, `approved_by_id`, `approved_at`, `approved_entry` | Who approved and through which entry: `web` in release one, `channel` from phase six; never `mcp`, `api`, or `cli`, because no token carries the approval operation. |
 | `executed_at`, `invalidated_reason text null` | |
 
 **The binding tuple** (R3 item 3) is `(actor, workspace, operation_name, destination_ref or
@@ -53,10 +53,13 @@ window refuses with `invalid_approval` and records nothing at the destination (c
 workspace is implicit in which database the row lives in.
 
 **Who may approve.** An authenticated account holding a role the operation allows, through the
-web interface or a `cli` token whose operation set includes `core.approval.approve`. `mcp` tokens
-cannot carry that operation ([MCP facade](runtime-and-mcp.md#the-mcp-facade)). Untrusted evidence
-never approves: no path reads a payload, a memory, or a message to set `state = approved`
-(FR 25, R3 item 8), and criterion 59's instructing text has no operation to reach.
+web interface. `core.approval.approve` and `.refuse` are non-token-issuable: no `cli`, `mcp`, or
+`runtime` token's operation set can contain them, enforced at issuance and again at presentation
+([tokens](identity-and-topology.md#what-a-token-can-never-carry-and-what-it-holds-for-a-gated-operation)),
+so a model cannot approve what it proposed and a person approves from a session, never from a
+credential that could sit in an agent's environment. Untrusted evidence never approves: no path
+reads a payload, a memory, or a message to set `state = approved` (FR 25, R3 item 8), and
+criterion 59's instructing text has no operation to reach.
 
 **Flow.**
 
@@ -73,15 +76,16 @@ never approves: no path reads a payload, a memory, or a message to set `state = 
 
 ## Standing grants
 
-| `core.standing_grant` column | Meaning |
-| --- | --- |
-| `id`, `actor_kind`, `actor_id`, `granted_by_id`, `created_at`, `expires_at`, `revoked_at null` | |
-| `classes text[]` | Subset of `{read, draft, mutate}`; any other value is refused at grant time (criterion 19, R3 item 5). |
-| `operation_set_id` | A named operation set; the grant covers only those names. |
+| Table | Columns | Notes |
+| --- | --- | --- |
+| `core.standing_grant` | `id`, `actor_kind`, `actor_id`, `granted_by_id`, `created_at`, `expires_at`, `revoked_at null` | One grant per actor and period. |
+| `core.standing_grant_operation` | `grant_id`, `operation_name text` | Primary key both columns. The operations the grant covers, written from the explicit list `core.standing_grant.create` receives. Every listed operation must be of class `read`, `draft`, or `mutate`; a destructive, external, or financial operation is refused at grant time naming it (criterion 19, R3 item 5). |
 
 A standing grant lets a token or session run the listed operations without a per-call
-confirmation the workspace would otherwise require. It never satisfies destructive, external, or
-financial: the dispatcher does not consult grants for those classes at all.
+confirmation the workspace would otherwise require through `approvals.confirm_operations`. It
+never satisfies destructive, external, or financial: the dispatcher does not consult grants for
+those classes at all. `core.standing_grant.create` and `.revoke` are non-token-issuable, so a
+grant is always a web session's act.
 
 ## Execution guards
 
@@ -94,7 +98,7 @@ it must add, because the core's are always present.
 | --- | --- | --- |
 | `ActorPermissionGuard` | every upper-class operation, by the core | Either actor no longer permits the operation: the **gated actor** (`approval.actor_*`, whose call was held) has lost the membership, role, or token that permitted it, or the **approving actor** (`approved_by_*`) has lost the membership or role that let it approve. The two differ for a headless token call approved by a person, and R3 item 4 wants a revocation of either to bite. |
 | `WindowGuard` | every upper-class operation, by the core | Outside `window_start` to `window_end`. |
-| `RecordStateGuard` | every upper-class operation whose input names a `subject_ref`, by the core, calling the owning module's resolver | The subject record was deleted or its `revision` changed since approval. |
+| `RecordStateGuard` | every upper-class operation whose input names a `subject_ref`, by the core, calling the owning module's resolver | The subject resolves to `deleted` or `unavailable`, or its `RecordHead.revision` ([identifiers](identifiers.md#resolution-under-permission)) differs from `approval.subject_revision`. Mutable types increment `revision` on every write; an immutable type (an observation, a receipt) reports the constant `1`, so the guard on it can only fail by deletion. |
 | `ContactPermissionGuard` | external operations with a party destination, by Leads | `leads.contact_permission.check(destination party, purpose, channel)` returns anything but `permitted` (criterion 61). |
 | `DestinationGuard` | external operations that execute a handoff or send through a connector, by the connector owning the destination | The destination is not registered, or the connector's credential is unavailable. Release one has no such operation outside the test harness: `leads.handoff.request` is mutate class and records `unavailable` itself ([handoffs](#opportunities-parties-qualifications-and-handoffs)), and the guard's first production use is the phase-five execution operation. |
 
@@ -137,6 +141,15 @@ All in the `leads` schema.
 Handoff destinations are not preset configuration in release one: there are none, and the
 phase-five destination is registered by the destination module, not chosen per preset. A
 `preset_handoff` table arrives with phase five if a preset then needs to name one.
+
+**Seeded at Leads enable.** The enable step writes, when absent: the package preset
+`inbound_services` as `pipeline_preset` plus `preset_version 1` with its stages, transitions,
+requirements, fields, `preset_rubric` pin (`inbound_services`, 1), and `followup` template, from
+`modules/leads/presets/inbound_services/1.toml`; one `pipeline` named `inbound` on it, owned by
+the workspace's owner account; and the manual-capture connection with its mapping
+([intake](intake-and-events.md#transports)). Rubrics are package data and need no seeding. A
+funnel is not seeded, because criterion 40 wants a capture with no funnel refused and the owner
+to name the first one; the demo fixtures under `examples/` create theirs.
 
 Opportunities and qualifications pin `preset_version` at creation; their full rows are in
 [the opportunity records](#opportunities-parties-qualifications-and-handoffs).
@@ -198,9 +211,12 @@ state) is in [intake](intake-and-events.md#entities).
 | `draft` | `opportunity_id`, `kind text`, `body text`, `template_version integer null`, `runtime_request_id uuid null`, `created_by_kind`, `created_by_id`, `created_at` | The draft class's result is a record (R3): `leads.followup.draft` writes one with `kind = followup`. Nothing leaves. |
 | `handoff` | `opportunity_id`, `purpose text`, `destination_ref text null`, `idempotency_key text`, `snapshot_digest bytea`, `state text`, `result_ref text null`, `result_detail text null`, `approval_id uuid null`, `external_action_id uuid null`, `requested_by_kind`, `requested_by_id`, `requested_at`, `resolved_at null` | The six FR 45 and criterion 64 facts: durable identifier (`id`), source opportunity, purpose, destination, approved payload snapshot (`handoff_snapshot` plus `snapshot_digest`), and result (`state`, `result_ref`, `result_detail`). Unique `(opportunity_id, idempotency_key)`. `state` in `unavailable`, `pending`, `succeeded`, `failed`, `unresolved`, `cancelled`. Release one writes only `unavailable` with `result_detail = no_destination`; `approval_id` and `external_action_id` are filled by the phase-five execution. Several intentional handoffs from one opportunity are several rows with distinct purposes; there is no `converted` flag (idea document). |
 | `handoff_snapshot` | `handoff_id pk`, `body jsonb`, `byte_length integer` | The payload as requested, never queried, bounded by `approvals.max_payload_bytes`. Its digest is what a phase-five approval binds. Removed with the opportunity. |
+| `opportunity_note` | `opportunity_id`, `body text`, `stage_id text null`, `created_by_kind`, `created_by_id`, `created_at` | A note a person wrote on the opportunity. `leads.opportunity.transition` writes one when its `note` argument is non-empty, with the `stage_id` it accompanied; `leads.opportunity.add_note` writes one without a stage. Intake never writes or reads this table, which is how criterion 49's note survives any later observation: there is no rule under which a source could touch it. Removed with the opportunity. |
 
-There is no stage-transition history table: every transition is a mutate operation with the
-opportunity as its audit subject, and `core.audit.list` filtered by subject is the history.
+There is no stage-transition history table. Every transition is a mutate operation with the
+opportunity as its audit subject, so `core.audit.list` filtered by the subject lists each
+transition's actor, time, and request digest, and the text a person wrote at the transition is in
+`opportunity_note` with its `stage_id`; the audit row holds a digest and never the note.
 
 **Where a rubric lives.** A rubric is **package data referenced by slug and version**
 (`modules/leads/rubrics/<slug>/<version>.toml`, listing the objective and the four dimensions'
@@ -214,16 +230,22 @@ changing `qualification`'s columns.
 ### The handoff operation (FR 45, criterion 64)
 
 `leads.handoff.request(opportunity_ref, purpose, destination_ref null, payload,
-idempotency_key)`, **mutate class**, `KEYED(idempotency_key)`, roles `owner`, `member`:
+idempotency_key)`, **mutate class**, `NATURAL` idempotency on the unique index
+`(opportunity_id, idempotency_key)`, roles `owner`, `member`:
 
 1. Resolve the opportunity under the caller's context; refuse `not_found` otherwise.
-2. Write `handoff` and `handoff_snapshot` with the digest.
-3. If `destination_ref` is null or names no registered destination (release one registers
+2. Look up `handoff` by `(opportunity_id, idempotency_key)`. A row exists: this is a repeat.
+   Return that row unchanged when the request's payload digest equals its `snapshot_digest`, and
+   refuse `idempotency_key_reused` naming the handoff when it differs. The natural key carries the
+   opportunity, so the same key on a different opportunity is a different request and a different
+   row, and no stored-result table is needed to make a repeat safe.
+3. Otherwise write `handoff` and `handoff_snapshot` with the digest.
+4. If `destination_ref` is null or names no registered destination (release one registers
    none), set `state = unavailable`, `result_detail = no_destination`, `resolved_at = now()`,
    publish `leads.handoff.requested`, and return the record with its explicit `unavailable`
    state. Nothing is created anywhere and no opportunity outcome changes (criterion 64,
    guardrail 20).
-4. Otherwise (phase five onward) set `state = pending` and call the destination's execution
+5. Otherwise (phase five onward) set `state = pending` and call the destination's execution
    operation, which is the external-class step with its own approval, `DestinationGuard`, and
    `external_action` record; its outcome is written back to `state`, `result_ref`, and
    `result_detail` through the operation record it returns, never by a cross-schema write.
@@ -241,6 +263,7 @@ operations while the handoff operation still exists and is callable.
 | `leads.opportunity.get`, `.list`, `.search` | read | owner, member, service | `leads_get`, `leads_list`, `leads_search` |
 | `leads.opportunity.update` (title, owner, value, extension fields; sets field `owner = user`) | mutate | owner, member | `leads_update` |
 | `leads.opportunity.transition(ref, to_stage_id, note)` | mutate | owner, member | `leads_transition` |
+| `leads.opportunity.add_note(ref, body)`, `.list_notes` | mutate, read | owner, member | none in release one |
 | `leads.opportunity.attach_observation`, `.add_party`, `.remove_party` | mutate | owner, member | none in release one |
 | `leads.qualification.assess` (long-running when a model participates), `.list` | mutate, read | owner, member, service | `leads_qualify` |
 | `leads.followup.draft` | draft | owner, member, service | `leads_prepare_followup` |
@@ -250,9 +273,11 @@ operations while the handoff operation still exists and is callable.
 | `leads.funnel.create`, `.archive`, `leads.campaign.create`, `.archive` | mutate | owner | none in release one |
 | `leads.connection.create`, `.update_mapping`, `.set_routing`, `.rotate_secret`, `.revoke_secret`, `.revoke` | mutate | owner | none in release one |
 | `leads.connection.health`, `.list` | read | owner | `leads_connection_health` |
+| `leads.conflict.list(connection_ref, state)`, `.resolve(conflict_ref, note)` | read, mutate | owner | none in release one |
 | `leads.import.run` | mutate, long-running | owner | none |
 | `leads.intake.capture` | mutate | owner, member | `leads_capture` |
-| `leads.contact_permission.record`, `.withdraw` | mutate | owner, member | none in release one |
+| `leads.intake.accept_delivery` | mutate; `AuditSpec(subject = the receipt)` | service, owner, member (called by the three connectors only: the webhook route as a `connection` actor, the import job as a `system` actor, and `leads.intake.capture` in the capturing person's context) | none |
+| `leads.contact_permission.record`, `.withdraw`, `.suppress` | mutate | owner, member | none in release one |
 | `leads.contact_permission.check` | read | owner, member, service | none |
 | `core.record.delete` for `leads.observation`, `leads.opportunity` | destructive | owner | `leads_delete` |
 

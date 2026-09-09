@@ -50,7 +50,7 @@ share one image.
 The proxy's routing table is the same in both topologies ([identity and topology](identity-and-topology.md#the-routing-table)):
 `/auth/*`, `/api/*`, and `/mcp` go to `core`; everything else on an application host goes to
 `web`. The web tier reaches `core` over the container network at `RHEO_CORE_INTERNAL_URL`, a
-second listener the proxy never exposes, forwarding the session id in a header the public
+second listener the proxy never exposes, forwarding the session secret in a header the public
 listener ignores ([the internal API's trust boundary](identity-and-topology.md#sessions-and-cookies));
 the browser never calls the `api` host for the first-party interface, which is why release one
 needs no CORS allowlist.
@@ -71,8 +71,8 @@ and no service accepts a workspace or actor any other way (FR 2, FR 23).
 | `actor` | `Actor(kind, id)` | `kind` in `account`, `token`, `operator`, `system`, `connection`; `id` is the account, token, or connection id, or null for `system` |
 | `role` | `owner`, `member`, `operator`, or `service` | from `control.membership` for an account or a token's account; `operator` for the CLI; `service` for a `connection` actor and a `system` actor |
 | `entry` | `web`, `api`, `mcp`, `cli`, `job`, `intake`, `channel` | which boundary built the context |
-| `audience` | `Audience(kind, id)` | who may see outputs: `session`, `token`, `job`, or `channel:<conversation>` |
-| `operation_set` | frozen set of operation names, or `all` | from the token; `all` for a web session and the operator; for a `connection` actor the operations its module's `connector_bindings` name for that transport; for a `system` actor at `entry = job` the operations whose declared roles include `service` |
+| `audience` | `Audience(kind, id)` | who may see outputs: `session` (id: the account), `token` (id: the token; its account is the person behind it), `job` (the originating operation's audience, copied onto the job when an operation enqueues it; a scheduled job has none), or `channel:<conversation>`. The memory module maps this to a memory's audience ([memory](memory.md#audience-and-purposes-fr-27-criteria-27-and-28)). |
+| `operation_set` | frozen set of operation names, or `all` | from the token's snapshot rows; `all` for a web session and the operator; for a `connection` actor the operations its module's `connector_bindings` name for that transport; for a `system` actor at `entry = job` the operations whose declared roles include `service` |
 | `enabled_modules` | frozen set of module ids | from `core.module_state` for this workspace |
 | `request_id` | uuid | for logs and the audit record |
 
@@ -94,7 +94,9 @@ operations whose declaration lists `service` among its roles; every operation a 
 handler calls (`relationships.party.resolve_or_create`, `leads.opportunity.create_from_observation`,
 `recallatron.memory.remember`) lists it, and every configuration operation does not, so a job
 cannot install a module or rotate a secret however it is written. Neither actor can approve
-anything: `core.approval.*` lists `owner` and `member` only.
+anything: `core.approval.*` lists `owner` and `member` only, and is non-token-issuable besides
+([tokens](identity-and-topology.md#what-a-token-can-never-carry-and-what-it-holds-for-a-gated-operation)),
+so in release one the approval operation exists in a web session's context and nowhere else.
 
 ## Request lifecycle
 
@@ -114,6 +116,20 @@ Every operation, whatever surface called it, runs the same way:
 
 The MCP facade, the HTTP API, and the web tier's internal API are three thin encodings of step 1
 over the same registry. None of them contains a branch on domain meaning.
+
+**The HTTP `api` surface** is one route shape over the registry, so that no builder invents a
+resource layout per module: `POST /api/v1/operations/<operation_name>` with the operation's
+input model as the JSON body, returning `{ "state", "operation_id", "result" | "error" }` where
+`state` is the operation record's state (`succeeded` with the output model in `result`;
+`approval_required` with the approval id in `result`; `failed` or `refused` with `error_code` and
+`error_text` in `error`; `pending` for a long-running operation, whose caller then polls
+`GET /api/v1/operations/<operation_id>`, the same shape). The webhook receiver's route
+([intake](intake-and-events.md#transports)) is the one route outside that shape, registered by a
+connector binding. The surface accepts bearer tokens of kind `cli` and `mcp`, never a cookie and
+never a `runtime` token ([presentation](identity-and-topology.md#tokens-for-cli-and-mcp-fr-4)),
+and its OpenAPI document is generated from the registry's input and output models at startup;
+the web tier's client is generated from that document and is never hand-edited. The internal
+listener serves the same routes to the web tier with the session header in place of the token.
 
 ## Directory and package mapping
 
@@ -160,8 +176,8 @@ The core knows no record type of its own beyond those tables. It has no `party`,
 | Module | Owns | Depends on |
 | --- | --- | --- |
 | `relationships` | Party, contact point, affiliation, merge record and its items, review candidate (R4; [relationships](relationships.md)) | core only |
-| `recallatron` | Memory, memory entity, mention, link, embedding, retention policy, migration batch ([memory](memory.md)) | core only; `leads` and `relationships` optional |
-| `leads` | Intake connection, field mapping, routing rule, funnel, campaign, delivery receipt, payload, conflict, observation, import batch ([intake](intake-and-events.md)); opportunity, its party and observation links, field state, pipeline preset and pipeline, qualification, draft, handoff and snapshot ([opportunity records](confirmation-and-safety.md#opportunities-parties-qualifications-and-handoffs)); contact permission record | core, `relationships` (required), `recallatron` (optional) |
+| `recallatron` | Memory and its purposes, memory entity, mention, link, embedding, migration batch ([memory](memory.md)) | core only; `leads` and `relationships` optional |
+| `leads` | Intake connection, field mapping, routing rule, funnel, campaign, delivery receipt, payload, conflict, observation, import batch ([intake](intake-and-events.md)); opportunity, its party and observation links, field state, notes, pipeline preset and pipeline, qualification, draft, handoff and snapshot ([opportunity records](confirmation-and-safety.md#opportunities-parties-qualifications-and-handoffs)); contact permission and suppression records | core, `relationships` (required), `recallatron` (optional) |
 
 `leads` requires `relationships`; `relationships` requires nothing (FR 40, criterion 54).
 `recallatron` links to Leads records by reference and declares Leads an optional dependency, which
@@ -238,3 +254,15 @@ Recorded here so a reader does not mistake them for oversights.
   that moment. A module enabled later receives no earlier events by design; the later lifecycle
   milestone's re-enable rule (no replay of completed external effects) is the same rule from the
   other side.
+- Criterion 18's second check, that the production registration set carries no external-class
+  or financial-class operation, is a **release-one invariant** (phases one to three), true
+  because the handoff request is mutate class and the only external-class operation is the test
+  sink. Phase five introduces the first production external-class operation, the handoff
+  destination's execution ([later phases](later-phases.md#phase-5-the-work-in-motion-module)),
+  and must change that CI assertion when it lands; until then the assertion is exact.
+- Approval is a web-session act in release one: no token of any kind carries `core.approval.*`
+  ([tokens](identity-and-topology.md#what-a-token-can-never-carry-and-what-it-holds-for-a-gated-operation)).
+  A person working from a terminal opens the interface to approve. The requirements do not ask
+  for command-line approval, and one rule with no kind branch is what makes A10 structural; a
+  later release that wants a person's `cli` token to approve would relax that one rule and
+  nothing else.

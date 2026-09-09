@@ -53,17 +53,21 @@ schema.
 | --- | --- | --- |
 | `account` | `id uuid`, `display_name text`, `created_at timestamptz`, `disabled_at timestamptz null` | A person. Not a workspace. |
 | `identity` | `id uuid`, `account_id`, `provider_id text`, `provider_subject text`, `email text null`, `email_verified boolean`, `created_at` | One row per login identity; unique on `(provider_id, provider_subject)`. `provider_id` is the identity provider's registered id (`github` first). |
-| `workspace` | `id uuid`, `slug text unique`, `display_name text`, `cluster_ref text`, `database_name text`, `state text`, `created_at`, `state_changed_at`, `state_detail text null` | `state` in `provisioning`, `migrating`, `active`, `unavailable`, `restoring`. `database_name` is derived, see routing. |
+| `workspace` | `id uuid`, `slug text unique`, `display_name text`, `database_name text`, `state text`, `created_at`, `state_changed_at`, `state_detail text null` | `state` in `provisioning`, `migrating`, `active`, `unavailable`, `restoring`. `database_name` is derived, see routing. |
 | `membership` | `account_id`, `workspace_id`, `role text`, `created_at` | Primary key `(account_id, workspace_id)`. `role` is `owner` or `member` (R1, FR 5). |
-| `session` | `id uuid`, `account_id`, `active_workspace_id uuid null`, `created_at`, `last_seen_at`, `expires_at`, `revoked_at null` | The web session. Its active workspace is the only source of "which workspace" for web requests. |
-| `session_grant` | `code_hash bytea`, `session_id`, `target_host text`, `expires_at`, `used_at null` | The one-time cross-host exchange in subdomain mode ([identity](identity-and-topology.md#sessions-and-cookies)). |
-| `access_token` | `id uuid`, `token_hash bytea`, `account_id`, `workspace_id`, `kind text`, `operation_set_id`, `issued_from text`, `purpose text null`, `created_at`, `expires_at`, `revoked_at null`, `last_used_at null` | CLI and MCP tokens (FR 4). `kind` is `cli` or `mcp`; `issued_from` is `session`, `operator`, or `runtime` (the run-scoped token a runtime adapter issues for one run). `purpose` is set on a run-scoped token from the run's purpose and is null on a person's token; the MCP facade renders tool outputs under it ([facade](runtime-and-mcp.md#the-mcp-facade)). |
-| `operation_set` | `id uuid`, `name text`, `workspace_id null` | A named set of permitted operations. Package-defined sets have null workspace. |
-| `operation_set_entry` | `operation_set_id`, `operation_name text` | One row per permitted operation. |
+| `session` | `id uuid`, `account_id`, `active_workspace_id uuid null`, `active_workspace_changed_at timestamptz null`, `created_at`, `last_seen_at`, `expires_at`, `revoked_at null` | The web session. Its active workspace is the only source of "which workspace" for web requests; `active_workspace_changed_at` records the last switch. The id never leaves the server. |
+| `session_secret` | `secret_hash bytea pk`, `session_id`, `host text`, `created_at` | The SHA-256 of the per-host session secret the browser holds in its cookie; unique `(session_id, host)`. One session has one row per application host it has visited ([identity](identity-and-topology.md#sessions-and-cookies)). |
+| `session_grant` | `code_hash bytea`, `session_id`, `target_host text`, `nonce_hash bytea`, `expires_at`, `used_at null` | The one-time cross-host exchange in subdomain mode; `nonce_hash` binds the grant to the browser that asked for it ([identity](identity-and-topology.md#sessions-and-cookies)). |
+| `access_token` | `id uuid`, `token_hash bytea`, `account_id`, `workspace_id`, `kind text`, `issued_from text`, `set_name text null`, `purpose text null`, `created_at`, `expires_at`, `revoked_at null`, `last_used_at null` | CLI and MCP tokens (FR 4). `kind` in `cli`, `mcp`, `runtime`; `issued_from` in `session`, `operator`, `runtime`, with a check constraint that `kind = runtime` and `issued_from = runtime` hold together. `set_name` is the package set the snapshot was expanded from, for display; null on a run-scoped token. `purpose` is set on a run-scoped token from the run's purpose and is null on a person's token; the MCP facade renders tool outputs under it ([facade](runtime-and-mcp.md#the-mcp-facade)). |
+| `access_token_operation` | `token_id`, `operation_name text` | Primary key both columns. The token's operation set, snapshotted at issuance and never widened ([tokens](identity-and-topology.md#tokens-for-cli-and-mcp-fr-4)). Deleted with a run-scoped token at run end. |
 | `identity_provider` | `provider_id text`, `enabled boolean`, `client_id text`, `client_secret_ref text` | Deployment-level provider configuration; the secret is a reference, never a value. |
-| `cluster` | `cluster_ref text`, `dsn_secret_ref text`, `state text` | Release one has exactly one row, written at first start from `storage.cluster_dsn_ref`, and every workspace names it. The table rather than a setting exists for phase eight, where a second row is how a workspace lands on a second cluster ([later phases](later-phases.md#phase-8-the-hosted-edition)); release one reads it and never adds to it. The DSN is a secret reference. |
 
 The control plane is small on purpose. Anything that could live in a workspace database does.
+There is no cluster table: release one has one cluster, named by the deployment setting
+`storage.cluster_dsn_ref` (a secret reference). A second cluster is phase-eight work and arrives
+as a `control.cluster` table plus a `workspace.cluster_ref` column in a control-plane migration
+([later phases](later-phases.md#phase-8-the-hosted-edition)); nothing in release one reads a
+cluster from a row.
 
 ## Server-derived routing (FR 2)
 
@@ -72,8 +76,8 @@ Storage routing is a pure function of the authenticated context:
 ```text
 ctx.workspace_id
   -> control.workspace row (state must be active)
-  -> (cluster_ref, database_name)
-  -> cluster.dsn_secret_ref resolved by the storage component's secret scope
+  -> database_name
+  -> storage.cluster_dsn_ref (deployment setting) resolved by the storage component's secret scope
   -> pool for that database (created on first use, cached)
 ```
 
@@ -148,9 +152,9 @@ this is the inventory.
 | --- | --- |
 | `workspace_composition`, `module_state`, `module_schema_version` | this document, [composition](#composition-and-schema-versions-fr-9) |
 | `workspace_setting`, `member_setting`, `member_credential` | this document, [configuration](#a5-configuration-precedence-and-the-policy-floor-fr-12) |
-| `outbox_event`, `event_delivery`, `consumer_processed`, `job`, `schedule`, `operation`, `audit_record`, `idempotency_result` | [intake and events](intake-and-events.md) |
-| `approval`, `approval_payload`, `standing_grant`, `external_action` | [confirmation and safety](confirmation-and-safety.md) |
-| `runtime_request`, `runtime_session`, `runtime_transcript` | [runtime and MCP](runtime-and-mcp.md) |
+| `outbox_event`, `event_delivery`, `consumer_processed`, `job`, `schedule`, `operation`, `audit_record` | [intake and events](intake-and-events.md) |
+| `approval`, `approval_payload`, `standing_grant`, `standing_grant_operation`, `external_action` | [confirmation and safety](confirmation-and-safety.md) |
+| `runtime_request`, `runtime_request_context`, `runtime_session`, `runtime_transcript` | [runtime and MCP](runtime-and-mcp.md) |
 | `deletion_record`, `export_record`, `export_record_ref`, `migration_verification` | [deletion, export, migration](deletion-export-migration.md) |
 
 ### Composition and schema versions (FR 9)
@@ -416,3 +420,11 @@ copy rather than a unit. Schema per workspace: covered under A1 above.
 no cross-workspace SQL; a cluster's database count as the scaling ceiling the hosted edition must
 plan around. The rejected options stay reachable: the seam is protocol-shaped, table names are
 adapter-mapped, and no domain code names Postgres.
+
+**Arrays and child tables.** The house rule prefers a normalized child table to an array or a
+JSON column. This specification keeps an array column only where the column is never a query
+predicate (provenance lists such as `qualification.evidence_refs` and `merge_record.evidence_refs`,
+the run's `permitted_tools` and `requirements`, a deletion record's `participants`), and gives a
+child table to every list a query filters by: a memory's purposes
+([`memory_purpose`](memory.md#entities)) and a run's context references
+([`runtime_request_context`](runtime-and-mcp.md#what-the-core-records-about-a-run)).

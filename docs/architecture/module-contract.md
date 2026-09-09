@@ -43,7 +43,7 @@ optional; a missing field fails validation at install with the field named (crit
 | `web` | optional `WebContribution(package_name, navigation, routes, record_views, forms, search_providers)` | The TypeScript contribution composed into `apps/web`. |
 | `agent_guidance` | optional path | Text a runtime may include as tool guidance. It describes use; it grants nothing (idea document). |
 | `secret_scopes` | list of scope prefixes | Empty for domain modules in release one. Only components that present secrets declare any. |
-| `connector_bindings` | list of `ConnectorBinding(transport, service_operation)` | Which of the module's operations a transport connector may call. Leads declares three. |
+| `connector_bindings` | list of `ConnectorBinding(transport, service_operation, route)` | Which of the module's operations a transport connector may call, and the HTTP route the binding registers on the `api` surface when the transport has one (`route` is null otherwise). Leads declares three, one per transport, all naming `leads.intake.accept_delivery` ([the three bindings](intake-and-events.md#transports)). |
 | `health_checks` | list of callables | Run by `rheo doctor` and the workspace status operation. |
 | `contract_tests` | path | The module's behavioural suite entry, run by the install path in test profile and by CI. |
 | `sensitivity` | mapping of record type to field tiers | Which fields are `public`, `internal`, `restricted` for the [redaction contract](runtime-and-mcp.md#the-redaction-contract). |
@@ -79,7 +79,7 @@ OperationDeclaration
   output: type[BaseModel]
   handler: Callable[[WorkspaceContext, UnitOfWork, input], output]
   roles: set[Role]                          # who may call; Role in {owner, member, operator, service}; default {owner, member}
-  idempotency: Idempotency                  # NONE | NATURAL | KEYED(field_name)
+  idempotency: Idempotency                  # NONE | NATURAL(unique index); KEYED arrives with phase five
   audit: AuditSpec | None                   # required unless safety_class is READ
   guards: list[ExecutionGuard]              # domain rechecks added to the core's, for DESTRUCTIVE, EXTERNAL, FINANCIAL
   long_running: bool                        # returns an operation id and runs as a job
@@ -99,9 +99,9 @@ The release-one operations and their roles are listed in the document that owns 
 | `core.workspace.create` | mutate, long-running | operator, and any account when `identity.allow_workspace_create` (deployment, default `true`); the creator becomes owner |
 | `core.module.install`, `.enable` | mutate | owner, operator |
 | `core.settings.set` (workspace keys), `core.settings.set_member` (member keys) | mutate | owner; owner, member |
-| `core.token.issue` (for the calling account), `.revoke` | mutate | owner, member (a token never exceeds its account's role); operator for another account |
-| `core.approval.approve`, `.refuse` | mutate | owner, member, through `web` or a `cli` token only |
-| `core.standing_grant.create`, `.revoke` | mutate | owner |
+| `core.token.issue` (for the calling account), `.revoke` | mutate | owner, member (a token never exceeds its account's role and never exceeds its issuer's own permitted set); operator for another account. Non-token-issuable: no token can issue or revoke a token ([tokens](identity-and-topology.md#what-a-token-can-never-carry-and-what-it-holds-for-a-gated-operation)). |
+| `core.approval.approve`, `.refuse` | mutate | owner, member. Non-token-issuable, so reachable only from a web session in release one: the only contexts that carry one of those roles and hold the operation. |
+| `core.standing_grant.create`, `.revoke` | mutate | owner. Non-token-issuable. |
 | `core.audit.list`, `core.work.failures` | read | owner, operator |
 | `core.work.retry`, `.skip`, `.replay`, `core.operation.resolve` | mutate | owner, operator |
 | `core.workspace.export`, `.digest` | mutate, long-running; read | owner, operator |
@@ -123,9 +123,11 @@ Registration rules the core enforces at startup (criterion 18, criterion 14, cri
   fragment" a mechanical check over the registered input models. The one workspace-taking
   endpoint, the session's active-workspace switch, is not a registered operation
   ([identity](identity-and-topology.md#accounts-sessions-and-the-active-workspace)).
-- `KEYED` idempotency names a field of the input model; the core stores the serialised output in
-  `core.idempotency_result` and returns it on a repeat
-  ([idempotent results](intake-and-events.md#idempotent-results)).
+- `NATURAL` idempotency names the unique index that makes a repeat the same row; the operation's
+  handler is what returns the existing row on a repeat, and the declaration exists so the
+  registry can assert the index is present in the module's schema at install. Release one has no
+  keyed idempotency and no stored-result table; the first operation that must return a created
+  reference on a retry is phase five's ([idempotency](intake-and-events.md#idempotency)).
 - A tool registered by a module may name a core operation (the deletion tools do) only when its
   input restricts the reference to the module's own record types.
 
