@@ -1614,6 +1614,32 @@ which records the rationale for each:
   the pull request that carries them; until that merge they are proposed, not
   settled. Every other open question below carries a recorded disposition.
 
+Settled by the [architecture specification](../architecture/README.md), as decisions
+A1 to A15 with rationale in the document each names; proposed until the maintainer
+merges the pull request that carries them:
+
+- The per-workspace storage unit is a database, not a schema; one Postgres schema
+  per module inside it ([storage](../architecture/storage-and-workspaces.md)).
+- Identifiers are UUID version 7 with typed record references
+  ([identifiers](../architecture/identifiers.md)); this closes guardrail 9.
+- Configuration precedence and the operator policy floor, and the secret store (a
+  file-backed store with an environment backend, behind one protocol) are chosen
+  ([storage](../architecture/storage-and-workspaces.md)); this closes the parts of
+  question 24 the requirements left to the specification.
+- Module manifest and registration contract version 1, with the full lifecycle on
+  paper ([module contract](../architecture/module-contract.md)); this closes
+  question 21 for the first release.
+- Event schemas, ordering, retry limits, replay, and the intake envelope
+  ([intake and events](../architecture/intake-and-events.md)); this closes question 6.
+- Runtime contract version 1, the MCP facade conventions, and the redaction contract
+  ([runtime and MCP](../architecture/runtime-and-mcp.md)); this closes question 12
+  and the capability-check half of question 10.
+- The final confirmation rules and the pipeline preset limits and migration operation
+  ([confirmation and safety](../architecture/confirmation-and-safety.md)); this closes
+  question 11's remainder and question 17.
+- Identity, sessions, tokens, and the URL topology as configuration
+  ([identity and topology](../architecture/identity-and-topology.md)).
+
 ### Recorded changes of direction
 
 Later documents should not reverse settled direction without recording the reason.
@@ -1706,22 +1732,21 @@ Three reversals are recorded here.
 - Encryption implementation and key management.
 - Open-source license and commercial model, deliberately deferred to the
   framework-proof phase.
-- Detailed domain schemas, events, API, and MCP contracts.
-- Module manifest and capability compatibility contracts, domain-pack composition,
-  and module lifecycle acceptance criteria beyond install and enable. The
-  relationships-module contract is settled above. The core/module boundary for the
-  first release is only partly settled there: the core surface and the first
-  configuration's dependencies are named, and the boundary detail is explicitly
-  left to the architecture specification.
-- Pipeline configuration limits, version migration, and the contact-purpose and
-  retention contracts beyond the first release. Identity resolution rules and data
-  ownership between Rheo Stream and an external CRM are settled above.
-- Reusable-pack export rules. Private storage paths, configuration precedence,
-  secret storage, and publication checks for the first release are partly settled
-  above: the required properties are stated as first-release requirements, while
-  the packaging-allowlist detail, the configuration precedence rules themselves,
-  and the choice of secret store are named there as architecture-specification
-  work. No secret store is chosen yet.
+- Detailed domain schemas, events, API, and MCP contracts beyond the first release.
+  The first release's are settled by the architecture specification above.
+- Domain-pack composition and module lifecycle acceptance criteria beyond install
+  and enable. The module manifest, the core/module boundary for the first release,
+  and the lifecycle contract on paper are settled by the architecture specification
+  above; the relationships-module contract is settled by the requirements.
+- The contact-purpose and retention contracts beyond the first release, and the
+  external correction flow. Pipeline configuration limits and version migration
+  are settled by the architecture specification above; identity resolution rules
+  and data ownership between Rheo Stream and an external CRM are settled by the
+  requirements.
+- Reusable-pack export rules and the packaging-allowlist detail. Private storage
+  paths, configuration precedence, and the secret store are settled by the
+  architecture specification above; the publication checks are first-release
+  requirements.
 - Voice and Telegram providers and operational details.
 - Depth and timing of the Tuttle integration.
 
