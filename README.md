@@ -20,14 +20,22 @@ routing inquiries from its own websites and forms. Job search is one optional
 workflow; a workspace can feed Leads from its own funnels and referral partners
 and never touch a job board.
 
-**Status: idea and repository scaffold.** There is no runnable application yet.
-The implementation stack, storage topology, module contracts, and license are
-still being decided. Directory names mark intended boundaries, not implemented
-features.
+**Status: idea, proposed requirements, and repository scaffold.** There is no
+runnable application yet. The requirements for the first release record
+directions the maintainer already gave, among them the implementation stack (a
+Python core with a Next.js web interface), the storage topology (Postgres, one
+database or schema per workspace), and how much of the module contract that
+release implements. Five further decisions, taken on the maintainer's behalf,
+await ratification through the maintainer's review of the pull request that
+carries them. The full module manifest and the license are still open. Directory
+names mark intended boundaries, not implemented features.
 
 Start with the [idea document](docs/ideas/rheo-stream-idea.md). It sets out the
 product thesis, the architecture direction, and a decision ledger that keeps
-settled choices separate from open questions.
+settled choices separate from open questions. The
+[requirements and scope](docs/requirements/requirements-and-scope.md) and the
+[build plan](docs/requirements/build-plan.md) propose what the first release
+does and in what order.
 
 ## Why this exists
 
@@ -65,7 +73,7 @@ connectors/                External source and destination adapters
 channels/                  Conversation surfaces such as text and voice
 runtimes/                  Replaceable agent execution adapters
 packs/                     Reusable domain packs; freelance software work first
-docs/                      Idea, future requirements and architecture records
+docs/                      Idea, requirements, and architecture records
 examples/                  Synthetic examples only
 tests/                     Future contract, integration, and acceptance tests
 scripts/                   Repository checks and development tooling

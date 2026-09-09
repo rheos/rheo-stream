@@ -122,7 +122,9 @@ home for the project.
 Likely public endpoints, when they are needed, include:
 
 - `rheo.stream` — project and product home
-- `app.rheo.stream` — hosted application
+- `circuit.rheo.stream` — the application shell (originally `app.`; see the recorded
+  change of direction in the decision ledger)
+- `auth.rheo.stream` — login and the OAuth callback
 - `docs.rheo.stream` — documentation
 - `api.rheo.stream` — public application API
 - `mcp.rheo.stream` — MCP endpoint
@@ -1568,19 +1570,109 @@ history.
 - AI runtime selection is configurable. Claude CLI (`claude -p`) and OpenRouter
   are required execution options; Codex CLI (`codex exec`) is an additional target
   whose integration must be validated. Domain modules and channels stay independent
-  of the selected runtime and model.
+  of the selected runtime and model. Their rollout order is settled below.
 - Ignore rules accompany a clean-publication process; they do not make existing
   tracked data, Git history, or packaged artifacts safe to publish by themselves.
+
+Settled by the [requirements and scope document](../requirements/requirements-and-scope.md),
+which records the rationale for each:
+
+- Postgres is the sole reference storage backend for the first release, with one
+  database or schema per workspace and a small shared control plane for accounts
+  and the workspace registry. Billing belongs to the hosted edition and joins the
+  control plane in that phase, not in the first release. Per-workspace SQLite
+  becomes a contract goal for a possible later local-first edition, not
+  first-release code.
+- The implementation stack is a Python core (FastAPI domain services) plus a
+  Next.js web interface, chosen after an explicit comparison with a single
+  TypeScript monolith.
+- Recallatron is the first real module after the walking skeleton, then the
+  opportunity core, then the optional job-search workflow.
+- `ClaudeCliRuntime` ships first; the OpenRouter adapter is the required second
+  implementation for v1.0; Codex CLI remains a validation target. See the recorded
+  change of direction below.
+- The full module manifest and lifecycle contract are specified, while the first
+  release implements install and enable only. Disable, remove, purge, and restore
+  are a defined later milestone.
+- GitHub OAuth is the first login provider, behind a pluggable identity-provider
+  boundary. Command-line and MCP access uses local tokens.
+- URL topology is configuration. Single-host path mode is the default for
+  self-hosters; subdomain-per-module is supported and is what the reference
+  deployment uses. See the recorded change of direction below.
+- The web interface is ported from the two predecessor applications rather than
+  rewritten, under a bounded port inventory and the publication rules.
+- The memory port includes a real retrieval-layer rework, since the predecessor's
+  memory layer uses `sqlite-vec` and FTS5 rather than pgvector. It is contained
+  behind the retrieval adapter.
+- The reference instance is a single-server container deployment behind a reverse
+  proxy, so the web interface must not depend on hosting-platform-only features.
+- The workspace, membership, role, first-release-slice, confirmation-policy, and
+  relationships-contract questions are answered there, and a record-level deletion
+  path for observations, parties, and opportunities is proposed there as the
+  deletion half of question 19. These five (R1 to R5 in that document) are
+  proposals taken on the maintainer's behalf, ratified by the maintainer's merge of
+  the pull request that carries them; until that merge they are proposed, not
+  settled. Every other open question below carries a recorded disposition.
+
+### Recorded changes of direction
+
+Later documents should not reverse settled direction without recording the reason.
+Three reversals are recorded here.
+
+1. **Runtime rollout order.** This document states that Claude CLI and OpenRouter
+   execution "are explicit requirements." That is softened to a rollout order:
+   `ClaudeCliRuntime` ships first and the OpenRouter adapter is required before
+   v1.0. Reason: the requirement existed to stop the architecture assuming one
+   runtime, and requiring the structurally different second adapter before v1.0
+   serves that purpose completely. Read as a first-slice requirement it would delay
+   every domain decision behind two runtime integrations for no design benefit.
+   Guardrail 4 is unchanged and is enforced by the runtime contract from the first
+   adapter.
+2. **Module subdomains.** This document states that "individual module subdomains
+   are unnecessary unless the modules later become independently deployed public
+   services." That is overridden. Subdomain-per-module is supported and is what the
+   reference deployment uses (`leads.`, `current.`, and so on, alongside `api.`,
+   `mcp.`, and `docs.`, with the application shell on `circuit.`, the login and OAuth
+   callback on `auth.`, and `tuttle.` reserved for the integration surface only).
+   Reason: the maintainer wants module boundaries
+   visible in the address bar of the instance used daily, and one application
+   serving every host through host-based routing costs a routing table rather than a
+   deployment per module. Identity sits on its own host so the registered callback
+   URL does not move when the shell changes and a later second front end can share
+   one identity endpoint. Constraints: neither modules nor identity are separately
+   deployed, `auth.` being a route boundary rather than a second service; in
+   subdomain mode one session covers the shell host, the identity host and the module
+   hosts the application serves, and hosts it does not serve must not receive the
+   session cookie; in single-host path mode there is no identity host and the callback
+   is a path on the single origin; single-host path mode remains the default and stays
+   continuously exercised under guardrail 15; and a hosted multi-tenant edition must
+   choose deliberately between module subdomains and per-tenant subdomains, because
+   they compete for the same namespace level and a wildcard certificate covers one
+   level only.
+3. **The shell host is `circuit.`, not `app.`** This document's endpoint list named
+   `app.rheo.stream` as the hosted application. Renamed. Reason: under the module
+   subdomains above, `app.` is ambiguous, because `leads.` and `current.` are equally
+   "the application"; `circuit.` names the surface that carries the shell and the
+   workspace switcher specifically. An electrical circuit and a water circuit are both
+   ordinary usage, so the name reads in the same register as `rheo.stream` and
+   `current.`, and a circuit is also a route made in rounds, which is what the shell is
+   for. Nothing else changes: the shell host is still one host among the several a
+   single application serves through host-based routing, and in single-host path mode
+   it does not exist at all. The name is configuration like every other host here.
 
 ### Preferred but still to validate
 
 - One goal-oriented Rheo MCP façade is the initial agent boundary.
 - `claude -p` is a useful first local adapter. An OpenRouter adapter supplies its
   own agent loop; an API/agent SDK is appropriate for hosted operation. Validate
-  Codex's headless adapter and the rollout order through the common runtime contract.
+  Codex's headless adapter through the common runtime contract. The rollout order
+  is no longer open; it is settled above and recorded as a change of direction.
 - Workspace is the tenancy and portability boundary.
-- Per-workspace encrypted SQLite is a credible hosted storage option, especially
-  for local-first continuity and Tuttle compatibility.
+- Per-workspace encrypted SQLite remains a credible option for the hosted edition
+  and for a local-first edition, especially for local-first continuity and Tuttle
+  compatibility. It is not a first-release option: the first release settled on
+  Postgres and made per-workspace SQLite a contract goal, with no implementation
+  shipping.
 - A hybrid local-node design is the likely bridge between hosted Rheo sessions and
   local Tuttle data.
 - A clean modular monolith is a better beginning than premature microservices.
@@ -1610,18 +1702,26 @@ history.
 
 ### Open decisions
 
-- Final storage topology for each deployment mode.
+- Storage topology for the hosted edition. The first release is settled above.
 - Encryption implementation and key management.
-- Open-source license and commercial model.
-- Exact first public-release scope.
+- Open-source license and commercial model, deliberately deferred to the
+  framework-proof phase.
 - Detailed domain schemas, events, API, and MCP contracts.
-- Exact core/module boundary, manifest and capability contracts, relationships
-  scope, domain-pack composition, and module lifecycle acceptance criteria.
-- Exact pipeline configuration limits, version migration, identity resolution,
-  data ownership, and contact-purpose/retention contracts.
-- Private storage paths and configuration precedence, reusable-pack export rules,
-  secret storage, and publication/package-content checks.
-- Migration sequence, acceptance criteria, and release plan.
+- Module manifest and capability compatibility contracts, domain-pack composition,
+  and module lifecycle acceptance criteria beyond install and enable. The
+  relationships-module contract is settled above. The core/module boundary for the
+  first release is only partly settled there: the core surface and the first
+  configuration's dependencies are named, and the boundary detail is explicitly
+  left to the architecture specification.
+- Pipeline configuration limits, version migration, and the contact-purpose and
+  retention contracts beyond the first release. Identity resolution rules and data
+  ownership between Rheo Stream and an external CRM are settled above.
+- Reusable-pack export rules. Private storage paths, configuration precedence,
+  secret storage, and publication checks for the first release are partly settled
+  above: the required properties are stated as first-release requirements, while
+  the packaging-allowlist detail, the configuration precedence rules themselves,
+  and the choice of secret store are named there as architecture-specification
+  work. No secret store is chosen yet.
 - Voice and Telegram providers and operational details.
 - Depth and timing of the Tuttle integration.
 
