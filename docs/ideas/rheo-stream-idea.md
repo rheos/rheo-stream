@@ -385,20 +385,87 @@ workspace that still uses that package.
 
 ## Rheo: agent and interaction model
 
-Rheo should use a replaceable runtime rather than embedding Claude-specific process
-assumptions throughout the product.
+Rheo's AI execution must be configurable through replaceable runtime adapters.
+**Claude Code in print mode (`claude -p`) and OpenRouter API execution are explicit
+requirements. Codex CLI is an additional target adapter:** its documented headless
+interface makes it technically feasible, with integration and workflow suitability
+still to validate. No module or channel may assume one of these runtimes is present.
 
-An initial local implementation can use `claude -p`, including MCP configuration,
-streamed structured input/output, allowed-tool controls, and resumable sessions.
-That is useful for a personal or self-hosted installation. A hosted SaaS should use
-an API or supported agent SDK with service-owned credentials; it must not depend on
-a customer's Claude Code subscription login.
+Runtime selection and model selection are different settings. A runtime supplies
+the conversation and tool-execution machinery; a model/provider supplies inference.
+The conceptual adapters are:
 
-The conceptual runtime contract should therefore allow implementations such as:
+| Adapter | Execution path | Responsibility and intended use |
+| --- | --- | --- |
+| `ClaudeCliRuntime` | Spawn `claude -p` | Use Claude Code's agent loop, configured MCP tools, structured/streaming output, and scoped resumable sessions for local or personal self-hosted operation |
+| `OpenRouterRuntime` | Call the OpenRouter API with a configured model and provider policy | Supply a Rheo-controlled agent loop (directly or through an SDK), translate authorized tools, execute permitted calls, and return tool results to the model; usable by local and hosted installations |
+| `CodexCliRuntime` | Spawn `codex exec` | Use Codex's non-interactive agent loop, MCP integration, structured events, and explicit session IDs; validate as an alternative CLI adapter against the same contracts |
+| Other API/SDK runtimes | A supported provider API or agent SDK | Add direct-provider or other model execution without changing domain modules |
 
-- `ClaudeCliRuntime` for local and personal installations;
-- `ClaudeApiRuntime` or an agent-SDK runtime for hosted operation;
-- other hosted or local model runtimes in the future.
+[Claude Code's programmatic interface](https://code.claude.com/docs/en/headless)
+supports `-p` with `--output-format json` or `--output-format stream-json`; streaming
+uses `--verbose`. [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode)
+uses `codex exec`, with `--json` for JSONL events, `--output-schema` for a structured
+final response, and `codex exec resume <SESSION_ID>` to continue a specific session.
+These are existing CLI capabilities, not implemented Rheo Stream adapters.
+
+OpenRouter supplies model inference and tool-call requests. Its
+[tool-calling flow](https://openrouter.ai/docs/guides/features/tool-calling) leaves
+tool execution with the client. The proposed adapter must therefore manage the
+agent loop and dispatch through Rheo's authorized MCP/domain boundary. Changing
+an API base URL alone is not a complete replacement for either CLI agent.
+
+### Runtime configuration and portability
+
+The operator configures available adapters, credentials, and policy privately.
+Each application workspace may select a permitted runtime/model default, with
+explicit workflow overrides where useful. Store those choices and secret references
+in private configuration or the workspace database, not public packs. Hosted users
+select from operator-installed adapters; they cannot provide arbitrary shell
+commands, executable paths, or provider endpoints as workspace settings.
+
+The runtime contract should cover:
+
+- A request bound to an authenticated actor, workspace, audience, and durable
+  operation, with scoped context, permitted tools, output requirements, and limits.
+- Capability discovery for tool calling, structured output, streaming, continuation,
+  cancellation, and usage reporting. Reject unsupported requirements explicitly;
+  sharing an interface does not make every model or runtime equally capable.
+- Normalized progress, tool results, final output, failure, cancellation, and approval
+  states. Check terminal status and validate results; a text reply is not proof that
+  a requested domain action succeeded. Report usage/cost only when available, with
+  estimates identified separately, and enforce host deadlines and iteration limits.
+- Rheo-owned business state and permitted conversation history. Native session IDs
+  are private adapter handles bound to runtime, credential scope, actor, workspace,
+  and audience. Never resume a global "latest" session. Switching adapters starts
+  a new native session with selected authorized context; opaque session files are
+  not portable, and completed effects must not be replayed.
+
+For OpenRouter, model capabilities and underlying provider routing both matter.
+Set an explicit model/provider allowlist, required parameters, data policy, and
+fallback policy; use `require_parameters` where needed so unsupported parameters
+are not silently ignored. Fallbacks must stay within the approved policy rather
+than widening who receives private context. These controls are described in
+[OpenRouter provider routing](https://openrouter.ai/docs/guides/routing/provider-selection).
+Changing providers or retrying inference must not bypass action approval or repeat
+an already completed external effect.
+
+CLI adapters need a trusted executable and argument list, bounded subprocess
+execution, and explicit configuration for tools, hooks, plugins, environment, and
+private session storage. Pass task content as data, never interpolated shell code.
+Use a scoped working directory and constrained filesystem/network access; opening
+the parent development workspace must not expose every private sibling to a run.
+Built-in shell/file tools must not bypass Rheo's authorization or write its domain
+database directly. If an adapter cannot enforce a workflow's required boundary,
+that adapter is unsupported for that workflow. Headless execution must surface a
+denied or approval-required action without hanging or silently granting permission.
+
+Local CLI execution does not imply local/offline model inference. Provider data
+disclosure and authentication remain explicit choices. Personal installations can
+use locally provisioned CLI authentication where supported. A hosted SaaS should
+use an API or supported agent SDK with service-owned credentials; it must not depend
+on customers sharing consumer CLI subscription logins. The first production default
+and rollout order remain open; the architecture must accommodate these choices.
 
 The runtime owns model conversation mechanics. Rheo Stream owns identity,
 authorization, tool policy, domain data, audit history, and durable work state.
@@ -1009,7 +1076,8 @@ Rheo Stream should be able to grow toward three related modes.
 ### Self-hosted
 
 The user installs the harness and selected modules, owns the data and credentials,
-and may run Rheo through a local Claude session. Application upgrades replace code
+and selects a configured runtime, such as Claude CLI, OpenRouter, or the proposed
+Codex CLI adapter. Application upgrades replace code
 without replacing private workspace data. A friendly distribution might
 eventually support commands such as:
 
@@ -1337,8 +1405,9 @@ These questions are intentionally not resolved by this idea document:
    rather than database internals?
 9. Which Jobvis-inspired providers can legally and economically be enabled in a
    hosted SaaS?
-10. Which agent runtime is the supported hosted default, and what model-agnostic
-    behavior must the runtime contract guarantee?
+10. Which of Claude CLI, OpenRouter, and the proposed Codex CLI adapter ships first,
+    which API/SDK runtime is the supported hosted default, and what capability,
+    isolation, failure, and continuation checks must each adapter pass?
 11. What is the confirmation policy for applications, messages, submissions,
     destructive changes, and financial actions?
 12. What data is sent to model providers, and what redaction, retention, and
@@ -1381,6 +1450,10 @@ claim that the current applications implement the architecture:
 | Public pack export | A reviewable reusable pack omits personal overrides, real identities, connector details, and secret references |
 | Hosted workspace data | Runtime configuration and attachments are access-controlled by workspace/member permissions and absent from source, images, and frontend build assets |
 | Publication review | Selected files and new Git history are reviewed; private paths, package contents, and synthetic-fixture checks pass before publication |
+| Runtime choice | The same permitted workflow can select Claude CLI or OpenRouter through private configuration without changing a domain module; Codex CLI must pass the same contract checks before being declared supported |
+| Runtime capability mismatch | A model without required tool/schema support, or a CLI without enforceable isolation, is rejected before the workflow starts |
+| Runtime switch or retry | Authorized context carries forward, native sessions remain isolated, and completed actions are not replayed; provider fallback stays within the approved policy |
+| Headless approval or failure | An unavailable CLI, expired credential, denied tool, timeout, or incomplete stream yields a clear non-success state instead of a hung job or a false completion |
 | Business-only installation | A user connects a custom form and works a pipeline with no job boards, candidate profile, or application tools configured |
 | Client work without Leads | A consultant uses relationships, Current, and a specialist module without opportunity management or job-search dependencies |
 | A new specialist module | A small assessment example registers records, tools, UI contributions, jobs, migrations, and exports through public extension points; no profession switch or private-table access is added to the core |
@@ -1475,14 +1548,19 @@ history.
   data, credentials, private configuration, and operational records stay private.
 - Local use is a primary deployment mode. Hosted users keep private data in their
   authorized databases and workspace storage, with secrets managed separately.
+- AI runtime selection is configurable. Claude CLI (`claude -p`) and OpenRouter
+  are required execution options; Codex CLI (`codex exec`) is an additional target
+  whose integration must be validated. Domain modules and channels stay independent
+  of the selected runtime and model.
 - Ignore rules accompany a clean-publication process; they do not make existing
   tracked data, Git history, or packaged artifacts safe to publish by themselves.
 
 ### Preferred but still to validate
 
 - One goal-oriented Rheo MCP façade is the initial agent boundary.
-- `claude -p` is useful for the local first version; an API/agent SDK is appropriate
-  for hosted operation.
+- `claude -p` is a useful first local adapter. An OpenRouter adapter supplies its
+  own agent loop; an API/agent SDK is appropriate for hosted operation. Validate
+  Codex's headless adapter and the rollout order through the common runtime contract.
 - Workspace is the tenancy and portability boundary.
 - Per-workspace encrypted SQLite is a credible hosted storage option, especially
   for local-first continuity and Tuttle compatibility.
@@ -1556,8 +1634,13 @@ specification work:
   administration and a possible external integration/contribution target.
 - [Observable Job Agent (Jobvis)](https://github.com/jamwithai/observable-job-agent)
   — a reference for observable job search and source adapters.
-- [Claude Code CLI reference](https://docs.anthropic.com/en/docs/claude-code/cli-usage)
-  — relevant to the proposed local `ClaudeCliRuntime`.
+- [Claude Code programmatic usage](https://code.claude.com/docs/en/headless)
+  — print mode, structured output, streaming, and explicit session resumption.
+- [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode)
+  — `codex exec`, JSONL events, structured final output, and session resumption.
+- [OpenRouter tool calling](https://openrouter.ai/docs/guides/features/tool-calling)
+  and [provider routing](https://openrouter.ai/docs/guides/routing/provider-selection)
+  — client-owned tool execution and configurable model/provider constraints.
 - [OpenWeb Ninja JSearch](https://www.openwebninja.com/api/jsearch),
   [Adzuna developer API](https://developer.adzuna.com/), and
   [Remotive Jobs API](https://remotive.com/remote-jobs/api) — candidate Leads
