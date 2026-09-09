@@ -19,6 +19,13 @@
 !deploy/**
 
 # Re-exclude private artifacts and local dependencies within allowed source trees.
+**/AGENTS.md
+**/AGENTS.override.md
+**/CLAUDE.md
+**/CLAUDE.local.md
+**/.codex/**
+**/.claude/**
+**/.mcp.json
 **/.rheo-local/**
 **/.secrets/**
 **/rheo.local.*

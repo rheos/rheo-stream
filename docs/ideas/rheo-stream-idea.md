@@ -1146,6 +1146,14 @@ hosted tenants. Reusable behavior belongs in source; the values supplied by a
 particular person or business belong in their private workspace. Public documentation
 and examples must not embed real customer identities or depend on private projects.
 
+Project `AGENTS.md` and `CLAUDE.md` files may contain internal build procedures and
+are local, ignored files. Keep their detailed guidance and fresh-session handoffs
+in the private sibling agent-context directory, with small local entry files where
+each coding tool discovers them. Publish general contribution guidance separately
+in `CONTRIBUTING.md`. A new clone must not depend on the maintainer's private
+instructions to understand or build the public project; local continuity must be
+provisioned separately. See [private instructions and new sessions](../workspace-layout.md#private-instructions-and-new-sessions).
+
 ### Ignore rules are a second boundary
 
 The default data location is outside Git. For developers who deliberately use
@@ -1161,6 +1169,15 @@ An illustrative privacy baseline, to combine with normal build/tool ignores:
 # Optional checkout-local runtime state; default storage is outside the repo.
 /.rheo-local/
 /.secrets/
+
+# Local coding-agent instructions/configuration; internal build context is private.
+AGENTS.md
+AGENTS.override.md
+CLAUDE.md
+CLAUDE.local.md
+.codex/
+.claude/
+.mcp.json
 /rheo.local.*
 
 # Local/deployment environment values; examples contain placeholders only.

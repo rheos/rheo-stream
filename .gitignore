@@ -3,6 +3,15 @@
 /.secrets/
 /rheo.local.*
 
+# Private project instructions and local coding-agent configuration at any depth.
+AGENTS.md
+AGENTS.override.md
+CLAUDE.md
+CLAUDE.local.md
+.codex/
+.claude/
+.mcp.json
+
 # Environment values. Committed examples contain placeholders only.
 .env
 .env.*

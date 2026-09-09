@@ -11,6 +11,21 @@ from urllib.parse import unquote, urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 
 PRIVATE_PATHS = (
+    "AGENTS.md",
+    "AGENTS.override.md",
+    "CLAUDE.md",
+    "CLAUDE.local.md",
+    "modules/example/AGENTS.md",
+    "modules/example/AGENTS.override.md",
+    "modules/example/CLAUDE.md",
+    "modules/example/CLAUDE.local.md",
+    ".codex/config.toml",
+    ".claude/settings.json",
+    ".claude/rules/private.md",
+    "modules/example/.codex/config.toml",
+    "modules/example/.claude/settings.json",
+    ".mcp.json",
+    "modules/example/.mcp.json",
     ".rheo-local/workspaces/demo/profile.json",
     ".rheo-local/workspaces/demo/private-prompt.md",
     ".rheo-local/uploads/evidence.pdf",
@@ -46,6 +61,8 @@ PRIVATE_PATHS = (
 )
 
 PUBLIC_PATHS = (
+    "examples/AGENTS.example.md",
+    "examples/CLAUDE.example.md",
     ".env.example",
     ".env.production.example",
     "apps/example/.env.example",

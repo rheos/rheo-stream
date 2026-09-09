@@ -87,8 +87,11 @@ The same check runs in GitHub Actions. No application dependencies are required.
 
 ## Contributing and license
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) before changing
-the architecture or importing code. The project license has not been selected;
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing the architecture or importing
+code. Local `AGENTS.md` and `CLAUDE.md` files are ignored; keep internal build guidance
+and session handoffs in private agent context as described in the
+[workspace guide](docs/workspace-layout.md#private-instructions-and-new-sessions).
+The project license has not been selected;
 there is no LICENSE file yet. License and contribution terms must be settled before
 substantial implementation or outside code contributions.
 
