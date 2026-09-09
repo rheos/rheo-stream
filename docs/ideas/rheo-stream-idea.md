@@ -1605,10 +1605,12 @@ which records the rationale for each:
 - The reference instance is a single-server container deployment behind a reverse
   proxy, so the web interface must not depend on hosting-platform-only features.
 - The workspace, membership, role, first-release-slice, confirmation-policy, and
-  relationships-contract questions are answered there. A record-level deletion
-  path for observations, parties, and opportunities is decided there as well, as
-  the deletion half of question 19. Every other open question below carries a
-  recorded disposition.
+  relationships-contract questions are answered there, and a record-level deletion
+  path for observations, parties, and opportunities is proposed there as the
+  deletion half of question 19. These five (R1 to R5 in that document) are
+  proposals taken on the maintainer's behalf, ratified by the maintainer's merge of
+  the pull request that carries them; until that merge they are proposed, not
+  settled. Every other open question below carries a recorded disposition.
 
 ### Recorded changes of direction
 
@@ -1628,12 +1630,14 @@ Two reversals are recorded here.
    are unnecessary unless the modules later become independently deployed public
    services." That is overridden. Subdomain-per-module is supported and is what the
    reference deployment uses (`leads.`, `current.`, and so on, alongside `api.`,
-   `mcp.`, and `docs.`, with `tuttle.` reserved for the integration surface only).
-   Reason: the maintainer wants module boundaries visible in the address bar of the
-   instance used daily, and one application serving every host through host-based
-   routing costs a routing table rather than a deployment per module. Constraints:
-   modules are not separately deployed; the session cookie is scoped to the parent
-   domain in subdomain mode; single-host path mode remains the default and stays
+   `mcp.`, and `docs.`, with the application shell on `app.` and `tuttle.` reserved
+   for the integration surface only). Reason: the maintainer wants module boundaries
+   visible in the address bar of the instance used daily, and one application
+   serving every host through host-based routing costs a routing table rather than a
+   deployment per module. Constraints: modules are not separately deployed; in
+   subdomain mode one session covers the shell host and the module hosts the
+   application serves, and hosts it does not serve must not receive the session
+   cookie; single-host path mode remains the default and stays
    continuously exercised under guardrail 15; and a hosted multi-tenant edition must
    choose deliberately between module subdomains and per-tenant subdomains, because
    they compete for the same namespace level and a wildcard certificate covers one

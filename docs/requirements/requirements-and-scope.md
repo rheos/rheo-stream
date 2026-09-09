@@ -5,11 +5,10 @@ settled decisions D1 to D11 record directions the maintainer already gave. The f
 under [Questions resolved here](#questions-resolved-here), R1 to R5, were taken on the
 maintainer's behalf rather than by the maintainer, and the maintainer's review of the pull
 request that carries this document is the ratification step. Until that review, treat R1 to R5
-as proposals with recorded reasoning, not as accepted decisions.
-**Lineage:** This file replaces `docs/requirements/rheo-stream-requirements.md`, which was
-created earlier on this document's own branch as a two-line placeholder reading "Status: draft
-in progress. Content lands in this file during review of issue #4." and was then renamed to this
-path. That placeholder held no requirements, so this document supersedes no earlier requirements.
+as proposals with recorded reasoning, not as accepted decisions. This header is updated on
+merge.
+**Lineage:** This document supersedes no earlier requirements document. The path it replaced,
+`docs/requirements/rheo-stream-requirements.md`, held no requirements.
 **Source:** [Idea document](../ideas/rheo-stream-idea.md), including its 26 architectural
 guardrails, its 24 open questions, and its architecture acceptance-scenario table.
 **Companion:** [Build plan](build-plan.md), which carries the phased plan and the numbered
@@ -46,7 +45,7 @@ directly and must not block the rest.
 | Independent freelancer running the suite privately | Opportunities from their own funnels, worked to an outcome, with context that survives between sessions | Served. This is the first reference configuration. |
 | Business developing inquiries from its own sites, forms, assessments, events, or referral partners, with no job-search requirement | Generic intake and a pipeline that never mentions candidates or applications | Served. Job search ships later and stays optional. |
 | Job-search user | The enrichment and application-preparation depth that made the opportunity-discovery predecessor useful | Later phase. The core must not acquire job-shaped fields in the meantime. |
-| Consultant or small studio with several collaborators in one workspace | Shared workspace, per-member private material | Structurally supported (membership and roles exist from day one), not exercised. Invitation flow ships later. |
+| Consultant or small studio with several collaborators in one workspace | Shared workspace, per-member private material | Structurally supported (membership and roles exist from day one), not exercised. The invitation flow ships in the framework-proof phase, phase seven of the build plan. |
 | HR consultant, regulatory approval consultant, sales representative | Specialist records and rules in their own modules on shared infrastructure | Not served. Exercised only by a synthetic example module during the framework-proof phase. |
 | Technical user wanting selected modules | Install some modules, connect other tools | Partly served: modules are separately installable and enableable; disable and removal ship later. |
 | Hosted customer | Managed isolated workspace | Not served. The hosted edition is a later, deliberately unplanned phase. |
@@ -66,10 +65,10 @@ against them; neither reopens them.
 | D5 | **Module lifecycle: full contract on paper, install and enable in code.** The specification defines the complete manifest and lifecycle contract. Release one implements install and enable only. Disable, remove, purge, and restore are a defined later milestone. | The idea document names "modularity that ends at installation" as a principal risk, so the contract must be written now. It also names "building an automation platform before a useful workflow" as a risk, so the lifecycle machinery must not be built now. Writing the contract and deferring most of its implementation is the only way to honour both. |
 | D6 | **An OAuth code-host provider is the first login provider, behind a pluggable identity-provider boundary.** Other providers, email and password first among them, land later without touching domain code. Self-hosters register their own OAuth application; client id and secret live in private deployment configuration. CLI and MCP access uses local tokens, not browser OAuth. | The first users are developers who already hold such an account, so it removes a password store from release one entirely. The boundary exists so that this convenience does not become a permanent requirement for non-developer users. |
 | D7 | **URL topology is configuration, not hard-coded.** Single-host path mode is the default for self-hosters. Subdomain-per-module is a supported option and is what the reference deployment uses. All link generation goes through routing configuration. | A self-hoster with one hostname and one certificate must not be forced into wildcard DNS. The reference deployment must not be the only tested arrangement. See [Recorded changes of direction](#recorded-changes-of-direction). |
-| D8 | **The web interface is ported from the two predecessor applications, not rewritten.** Screens are carried over, design tokens and theme unified, and upgrades made only where cheap. | Rebuilding working interface code is the fastest route to the "endless rewrite" risk the idea document names. The port is bounded by the [UI port inventory](#ui-port-inventory) and gated by guardrail 1 and the publication rules, because ported interface code carries legacy names, hard-coded paths, and sometimes real data. |
+| D8 | **The web interface is ported from the two predecessor applications, not rewritten.** Screens are carried over, design tokens and theme unified, and upgrades made only where cheap. The application shell is the one exception: phase one builds it new, and phase two unifies navigation and theme on it, as the [UI port inventory](#ui-port-inventory) records. | Rebuilding working interface code is the fastest route to the "endless rewrite" risk the idea document names. The port is bounded by the [UI port inventory](#ui-port-inventory) and gated by guardrail 1 and the publication rules, because ported interface code carries legacy names, hard-coded paths, and sometimes real data. |
 | D9 | **The memory port includes a real retrieval-layer rework.** The memory layer inside the work-in-motion predecessor uses `sqlite-vec` for embeddings and FTS5 for search. Neither exists in Postgres. The port replaces them with pgvector and with `tsvector`/`pg_trgm` or a hybrid, behind the retrieval adapter the idea document already requires. | Sized explicitly as its own requirement so it is not discovered mid-port. Containing it behind the retrieval adapter keeps the choice of ranking strategy revisable. |
 | D10 | **The reference instance is a single-server container deployment behind a reverse proxy with a wildcard certificate.** It is the reference self-host deployment under guardrail 15, so the web interface must not depend on platform-only features: no reliance on a particular hosting provider's edge functions, image pipeline, or build integrations. | Guardrail 15 says hosted-only assumptions must not accumulate unnoticed. The cheapest way to enforce that is to make the maintainer's own daily instance a plain self-host. |
-| D11 | **The memory module is the first real module, shipping after the walking skeleton and before the opportunity core.** | It is the smallest domain that can prove the module contract end to end. It owns records, migrations, configuration, tools with declared safety classes, an export format, and interface contributions, and it needs no other module to do any of that. Proving the contract on the opportunity core instead would entangle the first module-contract test with intake, party resolution, and pipeline configuration, so a contract defect and a domain defect would be indistinguishable. This is the decision the idea document's ledger already attributes to this document under module order; it is recorded here as its own row so that nothing else has to carry it. |
+| D11 | **The memory module is the first real module, shipping after the walking skeleton and before the opportunity core.** | It is the smallest domain that can prove the module contract end to end. It owns records, migrations, configuration, tools with declared safety classes, an export format, and interface contributions, and it needs no other module to do any of that. Proving the contract on the opportunity core instead would entangle the first module-contract test with intake, party resolution, and pipeline configuration, so a contract defect and a domain defect would be indistinguishable. |
 
 ### Historical migration notes
 
@@ -104,17 +103,23 @@ number of shipped adapters.
 unnecessary unless the modules later become independently deployed public services." This
 document overrides that. Subdomain-per-module is a supported topology and is what the
 reference deployment uses: `leads.rheo.stream`, `current.rheo.stream`, and so on, alongside
-`api.`, `mcp.`, and `docs.`, with the apex serving the project and marketing page.
-`tuttle.rheo.stream` is reserved for the integration surface only, since that back-office
-application stays external and local-first. Reason: the maintainer wants the module
+`api.`, `mcp.`, and `docs.`, with the apex serving the project and marketing page. The
+application shell, the login, the workspace switcher, and the OAuth callback are served on
+`app.rheo.stream`, so that the apex stays a static page and the callback URL has one host per
+topology. `tuttle.rheo.stream` is reserved for the integration surface only, since that
+back-office application stays external and local-first. Reason: the maintainer wants the module
 boundaries visible in the address bar of the instance they use daily, and one application
 serving all hosts through host-based routing costs a routing table, not a deployment per
 module. Constraints that come with the override:
 
-- One application serves every subdomain through host-based routing. Modules are not
-  separately deployed services.
-- In subdomain mode the session cookie is scoped to the parent domain, and wildcard DNS plus
-  a wildcard certificate cover the set.
+- One application serves the shell host and every module subdomain through host-based
+  routing. Modules are not separately deployed services.
+- In subdomain mode one session covers the shell host and the module hosts, which are the
+  hosts the application serves. The `api.` and `mcp.` hosts authenticate by token (FR 4) and
+  ignore the session cookie. The apex, the `docs.` host, and the reserved integration host are
+  not served by the application and must not receive the session cookie; whether that is
+  arranged by cookie scope or by the reverse proxy stripping it is an architecture-specification
+  decision. Wildcard DNS plus a wildcard certificate cover the set.
 - Single-host path mode remains the default and stays continuously exercised, because
   guardrail 15 makes the plain self-host arrangement the one that must not rot.
 - Carried forward to the hosted edition: module subdomains compete with per-tenant subdomains
@@ -298,18 +303,32 @@ correspondence inside another's record.
 **Decision.** Release one ships a record-level deletion path for observations, parties, and
 opportunities. It sits in the destructive safety class under R3, so every deletion takes an
 explicit per-action confirmation and no standing grant ever covers it. Deletion cascades the way
-FR 28 already requires for memory: derived summaries, embeddings, queued actions, and exports
-that carry the record go with it. Every deletion leaves a durable record of what was deleted, by
-whom, and when, and that record retains none of the deleted content.
+FR 28 already requires for memory, to derived summaries and embeddings, and beyond that to
+queued actions that depend on the record and to export artifacts that carry it. Every deletion
+leaves a durable record of what was deleted, by whom, and when, and that record retains none of
+the deleted content.
 
 Specifically:
 
 - The unit of deletion is one record of one of the three types, named by identifier. Release one
   has no bulk erase and no scheduled expiry beyond the memory retention setting FR 29 already
   requires.
+- "Exports that carry the record" means export artifacts the system still holds under its data
+  root and tracks by an export record. Deleting a record removes every such artifact that
+  carries it and marks the artifact's export record as removed by deletion. An artifact that has
+  already left the system, downloaded or copied elsewhere, is outside this path's reach, and the
+  path does not claim otherwise.
+- Deleting an observation does not delete its delivery receipt. The receipt retains the source
+  event identifier, the content digest, and the timestamps only; it holds no copy of the payload,
+  so it carries none of the person's data. It survives so that FR 33's durable-receipt guarantee
+  holds and so that FR 34 can still detect the same source event arriving again: a re-delivery
+  of a deleted observation's source event is recorded as a conflict against the surviving receipt
+  and never recreates the observation. This is the minimum suppression metadata the idea
+  document allows deletion to retain.
 - Deleting a party does not delete the observations that referenced it. Those observations lose
-  the party reference and become unlinked evidence, because destroying a delivery receipt would
-  break FR 33's guarantee that an acknowledged receipt is durable.
+  the party reference and become unlinked evidence, because observations are evidence records
+  with their own lifecycle (FR 39): the delivery happened whether or not the party record
+  survives.
 - Deletion is distinct from permission withdrawal under FR 46. Withdrawal stops future contact
   and future use; deletion removes the record. Neither implies the other, and the interface must
   not present them as one act.
@@ -496,10 +515,13 @@ These three are appended after FR 50 so that the numbering above stays stable.
 
 - **FR 51.** Deleting an observation, a party, or an opportunity is a supported record-level
   operation in the destructive safety class (R3, R5). It takes an explicit per-action
-  confirmation that no standing grant satisfies; it removes the record's derived summaries,
-  embeddings, and exports along with the record; it cancels queued actions that depend on the
-  record; and it writes a durable deletion record naming the actor, the time, the record type,
-  and the record identifier while retaining none of the deleted content.
+  confirmation that no standing grant satisfies; it removes the record's derived summaries and
+  embeddings along with the record, and every export artifact still held under the data root
+  that carries the record; it cancels queued actions that depend on the record; it leaves an
+  observation's delivery receipt in place, holding identifier, digest, and timestamps and no
+  payload, so that a re-delivery of the deleted source event is recorded as a conflict and never
+  recreates the observation; and it writes a durable deletion record naming the actor, the
+  time, the record type, and the record identifier while retaining none of the deleted content.
 - **FR 52.** A workspace export produces an artifact that restores into an empty deployment with
   its module composition, configuration versions, module schema versions, and records intact.
   Each module declares its own export format in its manifest, so a module's records travel with
@@ -516,7 +538,7 @@ These three are appended after FR 50 so that the numbering above stays stable.
 ### In scope
 
 - Repository bootstrap, the framework core, workspace and Postgres storage foundation, durable
-  work, and the MCP façade.
+  work, the approval and confirmation records R3 defines, and the MCP façade.
 - One agent runtime adapter (`ClaudeCliRuntime`), against a contract designed for more.
 - The memory module, ported with its retrieval layer reworked, plus migration and cutover from
   the predecessor.
@@ -546,7 +568,8 @@ These three are appended after FR 50 so that the numbering above stays stable.
 - The external back-office integration and the local node protocol.
 - The hosted multi-tenant edition, per-workspace encryption, and key management.
 - Any second storage backend, including the SQLite contract goal.
-- Invitation flow, seat management, and roles beyond `owner` and `member`.
+- Invitation flow, seat management, and roles beyond `owner` and `member`. The invitation flow
+  lands in the framework-proof phase of the build plan.
 - Bidirectional offline synchronization and multi-device concurrent writes.
 - The licence decision, which is deliberately deferred to the framework-proof phase.
 
@@ -614,14 +637,18 @@ acceptance criteria test.
 11. **An inbound form submission contains text instructing the agent to send something.** The
     text stays evidence. It cannot authorize an external action or change a safety class.
     (FR 25.)
-12. **The agent runtime binary is missing, its credential has expired, or its stream truncates
-    mid-run.** Explicit non-success, no hang, no false completion. (FR 21.)
+12. **The agent runtime binary is missing, its credential has expired, its deadline passes with
+    no answer, or its stream truncates mid-run.** Explicit non-success, no hang, no false
+    completion. (FR 21.)
 13. **A workflow requires structured output from a model that cannot produce it.** Rejected
     before the workflow starts, not discovered at parse time. (FR 20.)
 14. **The process dies between a state change and its event delivery.** The outbox makes them
     one transaction; the worker redelivers; the consumer deduplicates. (FR 15.)
-15. **A source connection's credential is revoked while work is queued.** Queued effects
-    recheck policy at execution and fail closed. (R3 item 4.)
+15. **A webhook connection's signing secret is revoked while a delivery it signed is still
+    queued.** The queued processing rechecks the connection at execution and fails closed with no
+    observation created; a later delivery signed with the old secret is refused before any
+    receipt is stored; both refusals are visible on the connection's health. (FR 31, FR 38,
+    R3 item 4.)
 16. **Contact permission is withdrawn after a memory was derived from the contact's data.**
     Retained memory does not bypass the restriction, and derived summaries and embeddings are
     invalidated along with the source. (FR 27, FR 28.)
@@ -647,6 +674,7 @@ Each with its source. An assumption without a source is an open question, not a 
 | The work-in-motion predecessor runs Next.js with Drizzle over `better-sqlite3` | Maintainer decision, recorded before this document; verified in source | Sizes the port. |
 | The memory layer uses `sqlite-vec` and FTS5, not pgvector | Maintainer decision, recorded before this document; verified in source | The reason D9 exists. |
 | The maintainer prefers Python for domain services | Maintainer decision, recorded before this document | One of four inputs to D3; not the only one. |
+| The maintainer chose the memory module as the first module after the walking skeleton | Maintainer decision, recorded before this document | The source for D11. The rationale in D11's row is this document's account of why the direction holds, not the origin of the direction. |
 | The maintainer accepts `ClaudeCliRuntime` first and the OpenRouter adapter as a v1.0 requirement rather than a first-slice one | Maintainer decision recorded in the idea document's decision ledger | The source for the first entry under [Recorded changes of direction](#recorded-changes-of-direction). Without it, D4's rollout order is a preference with no recorded origin. |
 | The maintainer wants module boundaries visible in the address bar of the instance they use daily | Maintainer decision recorded in the idea document's decision ledger | The source for the second entry under [Recorded changes of direction](#recorded-changes-of-direction). It buys a routing table, not a deployment per module, and single-host path mode stays the default so guardrail 15 is unaffected. |
 | The reference instance is a single-server container deployment behind a reverse proxy with a wildcard certificate | Maintainer decision, recorded before this document | Makes guardrail 15 self-enforcing. |
@@ -700,14 +728,14 @@ means it is an architecture-specification obligation; **L** means a named later 
 | 4. Domain services do not depend directly on Claude | R | FR 19 |
 | 5. The MCP server calls services, not databases | R | FR 22 |
 | 6. Modules do not write one another's storage | R | FR 11 |
-| 7. Storage-specific SQL stays behind repositories or adapters | R + A | FR 8 creates the seam; D2 makes proving a second backend an architecture obligation, not a release-one claim |
+| 7. Storage-specific SQL stays behind repositories or adapters | A | FR 8 states the seam as a requirement, but release one has no acceptance criterion for it (the build plan's coverage table records FR 8 as untested); D2 makes proving a second backend an architecture obligation first and the later local-first edition's work second |
 | 8. Every workspace tracks composition and schema versions | R | FR 9 |
 | 9. Identifiers are globally safe | A | Identifier scheme is an architecture-specification deliverable |
 | 10. Source provenance is first-class | R | FR 36, FR 37 |
 | 11. Side effects are confirmable and auditable | R | R3, FR 18, FR 24 |
 | 12. Long-running work is resumable or observable | R | FR 16, FR 17 |
 | 13. Channels share one authorization model | A + L | The authorization model is fixed by FR 1 and FR 23 now; the channels phase proves it with a second surface |
-| 14. Secrets are scoped to the narrowest component | R | FR 13 |
+| 14. Secrets are scoped to the narrowest component | R | FR 13, tested in phase one against the model credential and the OAuth client secret |
 | 15. Self-hosted is continuously exercised | R | D10, FR 48, and single-host mode as the default in FR 47 |
 | 16. The back-office integration remains independently replaceable | L | Back-office integration phase |
 | 17. Funnels do not define the core schema | R | FR 44 |
@@ -718,15 +746,17 @@ means it is an architecture-specification obligation; **L** means a named later 
 | 22. The core has no profession-specific rules | R | FR 44, and the core surface named in question 20's disposition |
 | 23. Module removal is a supported workflow | L | Module-lifecycle milestone, per D5 |
 | 24. Shared business records do not require Leads | R | FR 40 |
-| 25. Personalization is private data | R | FR 12, FR 13, FR 50 |
+| 25. Personalization is private data | R + A | FR 13 and FR 50 carry criteria; FR 12 is stated as a requirement but its precedence rules are untested in release one and are an architecture-specification deliverable (idea-doc question 24) |
 | 26. Runtime output stays outside the source tree by default | R | FR 10, FR 11 |
 
 ## What this document does not decide
 
 Deliberately absent, and owned by the architecture specification: database schemas, API
 endpoint shapes, event payload contracts, MCP tool signatures, the identifier scheme, the
-module manifest format, the redaction contract, and the pipeline preset configuration limits.
-Also absent: the licence, which waits for the framework-proof phase.
+module manifest format, the redaction contract, the pipeline preset configuration limits, and
+whether the per-workspace storage unit under D1 is a database or a schema, which changes the
+migration orchestration and the connection routing but no requirement here. Also absent: the
+licence, which waits for the framework-proof phase.
 
 The phased plan, with per-phase goals, scope boundaries, and numbered acceptance criteria,
 is in the [build plan](build-plan.md).
