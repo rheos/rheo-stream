@@ -1,15 +1,26 @@
 # Rheo Stream — phased build plan
 
-**Status:** Accepted plan skeleton. Phases one to three are planned to implementable depth;
-later phases are sketches that will be planned when their predecessor lands.
+**Status:** Proposed plan skeleton, awaiting maintainer ratification. Phases one to three are
+planned to implementable depth; later phases are sketches that will be planned when their
+predecessor lands. The decisions this plan is built on include four questions resolved on the
+maintainer's behalf (R1 to R4 in the companion requirements document). The maintainer's review
+of the pull request that carries these documents is the ratification step; until that review,
+treat R1 to R4 as proposed rather than accepted.
 **Companion:** [Requirements and scope](requirements-and-scope.md), which carries the decisions,
 functional requirements (cited as FR *n*), and the release-one scope boundary.
+**Decision citations:** D *n* is a settled decision and R *n* is a question resolved on the
+maintainer's behalf. Both are defined in the companion requirements document: D *n* under
+[Settled decisions](requirements-and-scope.md#settled-decisions), R *n* under
+[Questions resolved here](requirements-and-scope.md#questions-resolved-here). No criterion in
+this plan rests on a decision recorded anywhere else.
 **Source of acceptance criteria:** the architecture acceptance-scenario table in the
 [idea document](../ideas/rheo-stream-idea.md#architecture-acceptance-scenarios). Every criterion
 below names the scenario it comes from.
 
 Acceptance criteria are numbered continuously across the whole plan and are checkable by
-inspection or by a test. None is a judgement about quality.
+inspection or by a test. None is a judgement about quality. A
+[functional-requirement coverage table](#functional-requirement-coverage) at the end of this
+document maps every FR from 1 to 50 to the criteria that test it.
 
 Release one is phases one to three. Phases four onward follow it.
 
@@ -50,7 +61,7 @@ ships in this phase.
 
 1. A clone of the public repository, with no private configuration and no credentials, builds
    and starts the synthetic demo, and the demo completes without reading any file outside the
-   checkout and the synthetic fixture set. *(Scenario: Fresh public clone.)*
+   checkout and the synthetic fixture set. *(Scenario: Fresh public clone; FR 14.)*
 2. Running the demo and normal startup writes no file inside the tracked source tree; `git
    status` is clean after a full run. *(Scenario: Local private workspace; FR 10, FR 14.)*
 3. With the checkout-local fallback directory explicitly selected, every configuration file,
@@ -63,37 +74,59 @@ ships in this phase.
 5. Each workspace's records are in a distinct Postgres database or schema, verified by a test
    that creates two workspaces, writes to one, and asserts the other's storage is unchanged.
    *(Scenario: Hosted workspace data; FR 7.)*
-6. No code path accepts a database path, connection string, schema name, or workspace
-   identifier from a request body, query parameter, model argument, or workspace setting. A test
-   supplies each of those and asserts the value is ignored and the authenticated context is used.
-   *(Scenario: Wrong workspace or channel audience; FR 2.)*
+6. No code path accepts a database path, connection string, schema name, workspace identifier, or
+   actor identity from a request body, query parameter, model argument, or workspace setting. A
+   test supplies each of those and asserts the value is ignored and the authenticated context is
+   used. *(Scenario: Wrong workspace or channel audience; FR 2, FR 12, FR 23.)*
 7. A request carrying a valid record or operation identifier belonging to another workspace is
    refused by the HTTP API, the MCP façade, and the job dispatcher alike. *(Scenario: Wrong
    workspace or channel audience; FR 1.)*
-8. Every workspace row records the installed core version, each installed module's version, and
-   each module's schema version, readable through a supported operation rather than by querying
-   a migration table directly. *(Scenario: Module reinstalled or upgraded; FR 9.)*
-9. A state change and its outgoing event commit in one transaction. A test that kills the
-   process between commit and delivery, then restarts, observes the event delivered exactly once
-   to a consumer that records processed identifiers. *(Scenario: Crash during handoff; FR 15.)*
-10. A worker killed mid-task releases its lease and the task is retried within its bounded retry
+8. A person signs in through the OAuth code-host provider and the resulting session carries an
+   actor, a workspace, and a role. The provider is reached only through the identity-provider
+   boundary, verified two ways: a second, non-OAuth provider implementation substituted behind
+   the same boundary leaves the domain service suite passing unchanged, and a check asserts no
+   domain module imports the provider package. An operation restricted to `owner` is refused to a
+   session whose role is `member`. *(Scenario: Hosted workspace data; FR 3, FR 5.)*
+9. A locally issued command-line or MCP token names exactly one actor, one workspace, and one
+   permitted operation set, and obtaining it never requires browser OAuth. A test presents a
+   malformed token, an expired token, and a valid token whose operation set excludes the
+   requested operation, and asserts each is refused with a distinct non-success state and leaves
+   no partial effect. *(Scenario: Headless approval or failure; FR 4.)*
+10. Every workspace row records the installed core version, each installed module's version, and
+    each module's schema version, readable through a supported operation rather than by querying
+    a migration table directly. *(Scenario: Module reinstalled or upgraded; FR 9.)*
+11. A state change and its outgoing event commit in one transaction. A test that kills the
+    process between commit and delivery, then restarts, observes the event delivered exactly once
+    to a consumer that records processed identifiers. *(Scenario: Crash during handoff; FR 15.)*
+12. A worker killed mid-task releases its lease and the task is retried within its bounded retry
     budget; a task exhausting its budget appears in a failure list with its error, and is not
     silently dropped. *(Scenario: Crash during handoff; FR 16.)*
-11. Every long-running operation returns an operation identifier before it completes, and that
+13. Every long-running operation returns an operation identifier before it completes, and that
     operation reports one of a fixed set of terminal statuses, including an explicit unresolved
     status. A test asserts no operation can report success without a recorded terminal check.
     *(Scenario: Crash during handoff; FR 17.)*
-12. A workflow that declares a requirement the configured runtime cannot satisfy (structured
+14. Every mutating operation writes an audit record naming actor, workspace, operation, and time,
+    readable through a supported operation rather than by querying a table directly. A mutating
+    operation registered without an audit path fails registration at startup with a named
+    operation, so the record cannot be skipped by omission. A test performs one mutation of each
+    registered kind and asserts a matching audit record exists for every one. *(Scenario: Crash
+    during handoff; FR 18.)*
+15. A workflow that declares a requirement the configured runtime cannot satisfy (structured
     output, streaming, or continuation) is rejected before the runtime is invoked, with a named
-    unmet capability. *(Scenario: Runtime capability mismatch; FR 20.)*
-13. A headless run whose executable is missing, whose credential is expired, whose tool is
+    unmet capability. *(Scenario: Runtime capability mismatch; FR 19, FR 20.)*
+16. A headless run whose executable is missing, whose credential is expired, whose tool is
     denied, or whose output stream truncates returns a distinct non-success state within the
     configured deadline. A test induces each of the four and asserts no hang and no success
     report. *(Scenario: Headless approval or failure; FR 21.)*
-14. Every registered MCP tool declares exactly one safety class, and a tool registered without
+17. Every registered MCP tool declares exactly one safety class, and a tool registered without
     one fails registration at startup with a named tool. *(Scenario: Headless approval or
     failure; FR 24.)*
-15. A workspace export produces an artifact that a restore reads back into an empty deployment,
+18. Every tool the MCP façade exposes is namespaced and goal-level and reaches storage only by
+    calling an application service. A test enumerates the registered tools and asserts that none
+    accepts SQL, a table name, or a query fragment as an argument, and a check asserts that no
+    file in the MCP façade imports a database driver or a repository directly. *(Scenario: Wrong
+    workspace or channel audience; FR 22, guardrail 5.)*
+19. A workspace export produces an artifact that a restore reads back into an empty deployment,
     after which the restored workspace's composition, configuration versions, and records match
     the original, verified by comparison rather than by inspection. *(Scenario: Export and
     restore.)*
@@ -122,6 +155,10 @@ predecessor. This phase proves module contract v1 on the smallest domain that ca
   new retrieval layer, verification, and switchover.
 - The application shell, navigation, and theme unification, plus the memory browse, search, and
   entity screens ported from the predecessor.
+- The naming, topology, platform-dependency, and fixture-provenance checks, wired as gates in
+  continuous integration. They bind from this phase onward because this phase carries the first
+  ported interface code, which is where a legacy name, a hard-coded API path, or real data would
+  enter the public repository.
 
 **Out of scope**
 
@@ -133,40 +170,62 @@ predecessor. This phase proves module contract v1 on the smallest domain that ca
 
 **Acceptance criteria**
 
-16. The memory module is installed and enabled entirely through the registration contract: no
+20. The memory module is installed and enabled entirely through the registration contract: no
     core file changes to add it, verified by a test that enables it in a fresh workspace and
     asserts its records, tools, migrations, and interface contributions all appear.
     *(Scenario: A new specialist module; FR 26.)*
-17. The module's manifest declares its owned record types, its storage destination, its
+21. The module's manifest declares its owned record types, its storage destination, its
     migrations, its configuration schema, its provided tools with their safety classes, and its
     export format. A manifest missing any of these fails validation at install with a named
     missing field. *(Scenario: A new specialist module.)*
-18. The module writes only to its own storage. A test asserts that no memory-module code path
+22. The module writes only to its own storage. A test asserts that no memory-module code path
     holds a handle to another module's tables, and that the core's storage API is the only route
     to a connection. *(Scenario: A new specialist module; guardrail 6; FR 11.)*
-19. A retrieval call by an actor without permission on a source record returns no content
+23. A retrieval call by an actor without permission on a source record returns no content
     derived from that record, verified by a test that stores a memory under one permission
     scope and queries it under another. *(Scenario: Wrong workspace or channel audience; FR 27.)*
-20. A memory derived from two sources carries the intersection of their audiences, not the
+24. A memory derived from two sources carries the intersection of their audiences, not the
     union. A test combines a broadly readable source with a restricted one and asserts the
     result is restricted. *(Scenario: Wrong workspace or channel audience; FR 27.)*
-21. Deleting or superseding a source record invalidates its derived summaries and its
+25. Deleting or superseding a source record invalidates its derived summaries and its
     embeddings in the same operation, verified by querying the retrieval index afterward.
     *(Scenario: Permissions or contact purpose withdrawn; FR 28.)*
-22. Every workspace has an explicit memory retention setting, and a workspace created with no
+26. Every workspace has an explicit memory retention setting, and a workspace created with no
     explicit setting receives a bounded default rather than indefinite retention. *(Scenario:
     Permissions or contact purpose withdrawn; FR 29.)*
-23. The retrieval strategy is selected through the adapter, and a test runs the module's full
+27. The retrieval strategy is selected through the adapter, and a test runs the module's full
     behavioural suite against both a dense-only and a lexical-only configuration, both passing.
     *(Scenario: Runtime choice, applied to retrieval rather than to a model runtime; FR 30.)*
-24. The migration from the predecessor's memory store is verified by a count-and-sample
+28. The migration from the predecessor's memory store is verified by a count-and-sample
     comparison: every source record has a destination record, and a sampled set of retrieval
     queries returns the same records under the new retrieval layer as under the old one, within
     a documented tolerance recorded in the migration report. *(Scenario: Export and restore;
     D9.)*
-25. Every other release-one path completes correctly with the memory module disabled at the
-    workspace level, verified by running the phase-one acceptance suite with it off.
-    *(Scenario: Client work without Leads; FR 26.)*
+29. Every other release-one path completes correctly in a workspace where the memory module was
+    never installed and never enabled, verified by running the phase-one acceptance suite in such
+    a workspace. Workspace-level disable is phase-seven work under D5, so release one proves the
+    module boundary by absence rather than by disable. *(Scenario: Client work without Leads;
+    FR 26.)*
+30. No route, package, table, MCP tool, service name, environment variable, configuration key, or
+    user-facing string in the repository matches a legacy product name or a generalized
+    source-product prefix. The check runs in continuous integration on every branch from this
+    phase onward, and its scope includes this phase's ported surface: the application shell, the
+    navigation, the theme, and the memory browse, search, and entity screens. Documentation files
+    recording historical migration notes are the single allowed exception, listed explicitly.
+    *(Scenario: Publication review; FR 49, guardrail 1.)*
+31. Every link in the web interface is produced through routing configuration, with no route
+    string hard-coded to one topology. The interface test suite covering this phase's surface
+    passes in single-host path mode and in subdomain mode with no code change between the two
+    runs, and both runs are a continuous-integration gate from this phase onward. *(Scenario:
+    Fresh public clone; FR 47.)*
+32. The web interface builds and runs in the single-server container deployment with no
+    hosting-platform-specific feature in its dependency set, enforced by a build that fails on a
+    platform-only import or configuration key. That build is a continuous-integration gate from
+    this phase onward. *(Scenario: Fresh public clone; FR 48, guardrail 15.)*
+33. Ported interface code contains no personal data, rate, client name, or private deployment
+    detail, and every fixture in the repository is synthetic, asserted by a fixture provenance
+    check that runs in continuous integration from this phase onward. *(Scenario: Publication
+    review; FR 50.)*
 
 ---
 
@@ -202,86 +261,111 @@ interface and through Rheo. This phase completes release one.
 
 **Acceptance criteria**
 
-26. A valid signed webhook delivery is authenticated, stored, acknowledged, and processed to a
+34. A valid signed webhook delivery is authenticated, stored, acknowledged, and processed to a
     created opportunity with no agent runtime process running anywhere in the deployment.
-    *(Scenario: Intake without a model session; FR 35.)*
-27. The acknowledgement returned to the sender is emitted only after the receipt and its pending
+    *(Scenario: Intake without a model session; FR 35, FR 32.)*
+35. A CSV import and a JSON import are accepted through the same declarative, versioned field
+    mapping as the webhook receiver and produce normalized observations on the same path,
+    verified by a test that maps one source record through all three transports and asserts the
+    resulting observations are identical apart from their delivery transport. A file whose shape
+    does not match its declared mapping version is refused with a named field rather than
+    partially applied. *(Scenario: Two different custom funnels; FR 32.)*
+36. A manually captured inquiry produces a normalized observation through the same declarative,
+    versioned field mapping and the same processing path as a webhook delivery, with its
+    acquisition attribution recorded as manual capture rather than left empty. A test asserts the
+    resulting observation is indistinguishable in shape from a delivered one. *(Scenario: Two
+    different custom funnels; FR 32.)*
+37. The authenticated ingestion API resolves the workspace from the connection's own credential.
+    A test posts a delivery whose payload claims a different tenant, a different destination
+    workspace, and an elevated permission set, then asserts all three claims are ignored, the
+    observation lands in the credential's workspace, and the claimed values survive only as
+    evidence inside the stored payload. *(Scenario: Wrong workspace or channel audience; FR 31.)*
+38. The acknowledgement returned to the sender is emitted only after the receipt and its pending
     processing work are durably stored, verified by a test that fails the processing step and
     asserts the receipt survives. *(Scenario: Intake without a model session; FR 33.)*
-28. Two concurrent deliveries carrying the same source event identifier produce exactly one
+39. Two concurrent deliveries carrying the same source event identifier produce exactly one
     observation and exactly one processing effect. *(Scenario: Same event retried concurrently;
     FR 34.)*
-29. A delivery reusing an accepted source event identifier with different content is recorded as
+40. A delivery reusing an accepted source event identifier with different content is recorded as
     a conflict, is visible as one, and does not modify the existing observation. *(Scenario: Same
     event retried concurrently; FR 34.)*
-30. An observation arriving with an older source occurrence time than the current field values
+41. Every observation records per-field provenance, the source occurrence time, the server receipt
+    time, and a bounded copy of the source payload, with the bound enforced rather than advisory.
+    Acquisition attribution, meaning which funnel and which campaign, is stored in fields distinct
+    from the delivery transport, verified by a test that delivers the same funnel and campaign
+    through two transports and asserts the attribution matches while the recorded transport
+    differs. *(Scenario: Late evidence or scoring result; FR 36, guardrail 10.)*
+42. An observation arriving with an older source occurrence time than the current field values
     does not overwrite them, and a thinner observation does not overwrite a richer one. A test
     submits both orderings and asserts identical resulting field values. *(Scenario: Late
     evidence or scoring result; FR 37.)*
-31. A field absent from a payload and a field explicitly cleared by a payload produce
+43. A field absent from a payload and a field explicitly cleared by a payload produce
     distinguishable results. *(Scenario: Late evidence or scoring result; FR 37.)*
-32. A user-set stage or note survives any later observation, verified by a test that sets a
+44. A user-set stage or note survives any later observation, verified by a test that sets a
     stage by hand and then submits a fuller observation. *(Scenario: Late evidence or scoring
     result; FR 37.)*
-33. The same person completing two funnel steps produces two observations, and produces two
+45. The same person completing two funnel steps produces two observations, and produces two
     opportunities only when a routing rule says so. A test asserts one party, two observations,
     and the configured opportunity count. *(Scenario: One person, several interactions; FR 39.)*
-34. An automatic party match occurs only on an authenticated external subject identifier within
+46. An automatic party match occurs only on an authenticated external subject identifier within
     the connection's namespace or on a source-verified email address. A test presents a matching
     name, a matching company domain, and a matching phone number and asserts each produces a
     review candidate and no link. *(Scenario: One person, several interactions; FR 41, R4.)*
-35. Party matching never considers a party in another workspace, verified by a test that creates
+47. Party matching never considers a party in another workspace, verified by a test that creates
     identical parties in two workspaces and asserts no candidate crosses. *(Scenario: Wrong
     workspace or channel audience; FR 41.)*
-36. After a merge, both original party identifiers still resolve, and an unmerge restores the
+48. After a merge, both original party identifiers still resolve, and an unmerge restores the
     pre-merge state including every record's party reference. *(Scenario: One person, several
     interactions; FR 41, R4.)*
-37. Two unrelated funnels, the maintainer's inbound-inquiry form and a synthetic event-referral
+49. A workspace with the Leads module absent creates parties, contact points, and affiliations
+    through the relationships module and reads them back, verified by running the relationships
+    behavioural suite in a workspace where Leads is not installed. No relationships record carries
+    an opportunity field, and no relationships code path references a Leads table. *(Scenario:
+    Client work without Leads; FR 40, R4, guardrail 24.)*
+50. Two unrelated funnels, the maintainer's inbound-inquiry form and a synthetic event-referral
     funnel, run through the same intake contract with different declarative mappings, and neither
     requires a new core field, a provider-specific column, or a product name anywhere in the core.
     *(Scenario: Two different custom funnels; FR 44.)*
-38. A workspace works a pipeline to a terminal disposition with no job board configured, no
+51. A workspace works a pipeline to a terminal disposition with no job board configured, no
     candidate profile present, and no application tool registered. A test asserts the
     job-search-related configuration surface is absent rather than merely hidden. *(Scenario:
-    Business-only installation.)*
-39. Editing a pipeline preset does not change the stage meaning or field schema of opportunities
+    Business-only installation; FR 42, FR 44.)*
+52. Editing a pipeline preset does not change the stage meaning or field schema of opportunities
     created under an earlier configuration version, verified by a test that edits a preset with
     opportunities mid-stage and asserts their pinned version and stage semantics are unchanged.
     *(Scenario: Preset edited during active work; FR 43.)*
-40. Every opportunity and every qualification record stores the configuration version it was
+53. Every opportunity and every qualification record stores the configuration version it was
     created under, readable through a supported operation. *(Scenario: Preset edited during
     active work; FR 42, FR 43.)*
-41. An inbound payload whose text instructs the agent to send a message, grant a tool, or change
+54. An inbound payload whose text instructs the agent to send a message, grant a tool, or change
     a policy results in no tool grant, no policy change, and no external effect. The text is
     retrievable as evidence. *(Scenario: Source text requests a tool action; FR 25.)*
-42. Withdrawing contact permission causes a queued action against that contact to fail closed at
+55. An approval binds actor, workspace, operation, recipient or destination, payload digest,
+    purpose, and execution window. A test approves a payload, alters one byte of it, and asserts
+    execution is refused with an explicit invalid-approval state rather than executed against the
+    altered payload; the test repeats with an altered recipient and with an elapsed execution
+    window. A further case revokes the actor's permission between approval and execution and
+    asserts the execution rechecks and fails closed. *(Scenario: Headless approval or failure;
+    FR 24, R3 items 3 and 4.)*
+56. Withdrawing contact permission causes a queued action against that contact to fail closed at
     execution, and any memory derived from that contact's data stops being retrievable for the
-    withdrawn purpose. *(Scenario: Permissions or contact purpose withdrawn; FR 46, FR 27.)*
-43. Observed interest and permission to contact are separate records. A test asserts that
+    withdrawn purpose. *(Scenario: Permissions or contact purpose withdrawn; FR 46, FR 27,
+    FR 28.)*
+57. Observed interest and permission to contact are separate records. A test asserts that
     recording an inbound submission creates no contact permission by itself. *(Scenario:
     Permissions or contact purpose withdrawn; FR 46.)*
-44. Connection health, last successful intake, lag, and unresolved failures are readable per
+58. Connection health, last successful intake, lag, and unresolved failures are readable per
     connection through a supported operation and are visible in the connection settings screen.
     *(Scenario: Intake without a model session; FR 38.)*
-45. A handoff operation records a durable identifier, source opportunity, purpose, destination,
+59. A handoff operation records a durable identifier, source opportunity, purpose, destination,
     approved payload snapshot, and result. With no destination configured, requesting one yields
     an explicit unavailable state, not a silent success and not a created opportunity outcome.
     *(Scenario: Crash during handoff; FR 45, guardrail 20.)*
-46. No route, package, table, MCP tool, service name, environment variable, configuration key, or
-    user-facing string in the repository matches a legacy product name or a generalized
-    source-product prefix, enforced by a check that runs in continuous integration. Documentation
-    files recording historical migration notes are the single allowed exception, listed
-    explicitly. *(Scenario: Publication review; FR 49, guardrail 1.)*
-47. Every link in the web interface is produced through routing configuration. The application
-    passes its full interface test suite in single-host path mode and in subdomain mode, with no
-    code change between the two runs. *(Scenario: Fresh public clone; FR 47.)*
-48. The web interface builds and runs in the single-server container deployment with no
-    hosting-platform-specific feature in its dependency set, enforced by a build that fails on a
-    platform-only import or configuration key. *(Scenario: Fresh public clone; FR 48,
-    guardrail 15.)*
-49. Ported interface code contains no personal data, rate, client name, or private deployment
-    detail. Every fixture in the repository is synthetic, asserted by a fixture provenance check.
-    *(Scenario: Publication review; FR 50.)*
+60. Criteria 30 to 33 still pass with this phase's interface surface included: the opportunity
+    list and triage queue, the opportunity detail view, the qualification view, and the connection
+    settings screen. This criterion adds no new check; it asserts that the four gates established
+    in phase two run unchanged in continuous integration over the larger surface and that none of
+    them regressed. *(Scenario: Publication review; FR 47, FR 48, FR 49, FR 50.)*
 
 ---
 
@@ -389,3 +473,65 @@ not because its shape is decided. What is already recorded and carried forward:
   enabled in a public hosted service.
 
 **Answers on landing.** Idea-doc questions 3, 9, and the hosted half of question 2.
+
+---
+
+## Functional-requirement coverage
+
+Every functional requirement in the companion document, from FR 1 to FR 50, appears below. A
+requirement is either mapped to the acceptance criteria that test it, or recorded as deliberately
+untested in release one with the phase or milestone that carries it and the reason. A
+requirement with neither is a gap in this plan, and none is listed that way.
+
+| FR | Tested by | Note |
+| --- | --- | --- |
+| FR 1 | 7 | Cross-workspace refusal across all three entry surfaces is the boundary test. |
+| FR 2 | 6 | Storage routing may not come from any caller-supplied source. |
+| FR 3 | 8 | Substituting a second provider behind the boundary is the check that domain code depends on the boundary. |
+| FR 4 | 9 | Issuance, scope, and the three rejection cases. |
+| FR 5 | 8 | An `owner`-only operation refused to a `member` session is the role check. |
+| FR 6 | none in release one | Deliberate. Release one stores only the owner's material (R1), so no second member exists to exercise the separation; the invitation-flow milestone named in the release-one scope boundary tests it. |
+| FR 7 | 5 | Distinct database or schema per workspace. |
+| FR 8 | none in release one | Deliberate. D2 ships no second backend, so the adapter seam can only be proven by the later local-first edition that supplies one; release one writes the interface-level suite without a second implementation to run it against. |
+| FR 9 | 10 | Composition and schema versions as readable product data. |
+| FR 10 | 2, 3 | Runtime output outside the tracked tree, and the checkout-local opt-in fully ignored. |
+| FR 11 | 22 | The core storage API is the only route to a connection. |
+| FR 12 | 6 | Partial. Criterion 6 tests the load-bearing half, that a workspace setting cannot relax an operator security policy. The three-source precedence rules themselves are an architecture-specification deliverable that release one does not test. |
+| FR 13 | none in release one | Deliberate. Criterion 4 keeps credentials out of the repository, but it does not test FR 13 itself. That a secret is held by reference, scoped to the narrowest component, and never reaches a prompt, a tool argument, or general service context is fixed by the architecture specification's redaction contract (idea-doc question 12). |
+| FR 14 | 1, 2 | Fresh clone, synthetic demo, tracked source unchanged. |
+| FR 15 | 11 | Outbox in one transaction, exactly-once delivery after a kill. |
+| FR 16 | 12 | Leases, bounded retries, an inspectable failure list. |
+| FR 17 | 13 | Operation identifier and a terminal status set including unresolved. |
+| FR 18 | 14 | Written, readable, and impossible to skip by omission. |
+| FR 19 | 15 | Partial. The adapter contract is exercised from the first adapter. That no domain module or channel depends on a specific runtime is fully proven only by the structurally different second adapter in phase six (**Runtime choice**). |
+| FR 20 | 15 | Capability mismatch rejected before invocation. |
+| FR 21 | 16 | Four induced failure modes, no hang, no false completion. |
+| FR 22 | 18 | Namespaced goal-level tools, no raw database or privileged SQL path. |
+| FR 23 | 6 | Workspace and actor come from the authenticated session; a model-supplied argument is ignored. |
+| FR 24 | 17, 55 | Declared class at registration, and the approval binding that a declared class governs. |
+| FR 25 | 54 | Inbound text stays evidence. |
+| FR 26 | 20, 29 | Installable and enableable through the contract; every other path completes where it was never enabled. |
+| FR 27 | 23, 24, 56 | Permission-enforced retrieval, intersection of audiences, withdrawal honoured. |
+| FR 28 | 25, 56 | Invalidation of derived summaries and embeddings with the source. |
+| FR 29 | 26 | Explicit retention, bounded default. |
+| FR 30 | 27 | The behavioural suite passes on dense-only and lexical-only configurations. |
+| FR 31 | 37 | Workspace resolved from the connection credential; claimed values never override it. |
+| FR 32 | 34, 35, 36 | All three transports through one declarative versioned mapping. |
+| FR 33 | 38 | Acknowledgement only after durable receipt. |
+| FR 34 | 39, 40 | Concurrent duplicate, and conflicting content under one identifier. |
+| FR 35 | 34 | Intake with no runtime process anywhere in the deployment. |
+| FR 36 | 41 | Provenance, both timestamps, the bounded payload copy, attribution separate from transport. |
+| FR 37 | 42, 43, 44 | Older and thinner evidence, absent versus cleared, user-owned state. |
+| FR 38 | 58 | Health, last intake, lag, unresolved failures, per connection. |
+| FR 39 | 45 | Observations, parties, and opportunities as distinct lifecycles. |
+| FR 40 | 49 | Relationships usable with Leads absent. |
+| FR 41 | 46, 47, 48 | Two evidence classes only, no cross-workspace candidate, reversible merge. |
+| FR 42 | 51, 53 | Terminal disposition reached, and the pinned configuration version stored and readable. |
+| FR 43 | 52, 53 | Preset edits do not reinterpret existing records. |
+| FR 44 | 50, 51 | Two funnels through one core; no job-shaped surface present. |
+| FR 45 | 59 | The handoff operation exists and has no destination. |
+| FR 46 | 56, 57 | Interest and permission are separate records; withdrawal fails closed. |
+| FR 47 | 31, 60 | Both topology modes with no code change, held from phase two onward. |
+| FR 48 | 32, 60 | No hosting-platform-only dependency, held from phase two onward. |
+| FR 49 | 30, 60 | No legacy name anywhere outside the listed historical notes, held from phase two onward. |
+| FR 50 | 33, 60 | Ported code carries no real data; every fixture synthetic, held from phase two onward. |

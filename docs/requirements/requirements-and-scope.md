@@ -1,6 +1,15 @@
 # Rheo Stream — requirements and scope
 
-**Status:** Accepted requirements for release one. Supersedes no earlier requirements document.
+**Status:** Proposed requirements for release one, awaiting maintainer ratification. The ten
+settled decisions D1 to D10 record directions the maintainer already gave. The four questions
+under [Questions resolved here](#questions-resolved-here), R1 to R4, were resolved on the
+maintainer's behalf rather than by the maintainer, and the maintainer's review of the pull
+request that carries this document is the ratification step. Until that review, treat R1 to R4
+as proposals with recorded reasoning, not as accepted decisions.
+**Lineage:** This file replaces `docs/requirements/rheo-stream-requirements.md`, which was
+created earlier on this document's own branch as a two-line placeholder reading "Status: draft
+in progress. Content lands in this file during review of issue #4." and was then renamed to this
+path. That placeholder held no requirements, so this document supersedes no earlier requirements.
 **Source:** [Idea document](../ideas/rheo-stream-idea.md), including its 26 architectural
 guardrails, its 24 open questions, and its architecture acceptance-scenario table.
 **Companion:** [Build plan](build-plan.md), which carries the phased plan and the numbered
@@ -177,8 +186,10 @@ the source would invert the dependency.
 module ships in phase two, before the opportunity core, because it is the smallest domain that
 can prove the module contract. In the first release slice Rheo can recall and remember with
 workspace and record permissions enforced, and memories can link back to Leads records. The
-intake-to-outcome path must complete correctly with the memory module disabled. If it cannot,
-the module boundary is wrong.
+intake-to-outcome path must complete correctly in a workspace where the memory module was never
+installed and never enabled. If it cannot, the module boundary is wrong. Release one has no
+workspace-level disable path to test against, because D5 places disable in the later
+module-lifecycle milestone, so the boundary is proved by the module's absence instead.
 
 **Rationale.** The idea document's own success criterion is one person installing the system,
 connecting their own funnel, choosing a pipeline, and developing opportunities while retaining
@@ -361,7 +372,9 @@ acceptance criteria.
 ### Memory
 
 - **FR 26.** The memory module is installable and enableable through the module registration
-  contract, and every other release-one path completes correctly with it disabled.
+  contract, and every other release-one path completes correctly in a workspace where the module
+  was never installed and never enabled. Workspace-level disable is not a release-one path (D5),
+  so release one proves the boundary by absence rather than by disable.
 - **FR 27.** Retrieval enforces the caller's current workspace and record permissions before any
   content reaches a model. Derived memories inherit the access and purpose restrictions of their
   sources, and combining sources never widens the audience.
@@ -540,8 +553,9 @@ acceptance criteria test.
 16. **Contact permission is withdrawn after a memory was derived from the contact's data.**
     Retained memory does not bypass the restriction, and derived summaries and embeddings are
     invalidated along with the source. (FR 27, FR 28.)
-17. **The memory module is disabled.** The whole intake-to-outcome path still completes.
-    (FR 26.)
+17. **The memory module was never installed or enabled in the workspace.** The whole
+    intake-to-outcome path still completes. Disabling an enabled module is not a release-one
+    operation (D5), so this is the absence case rather than the disable case. (FR 26.)
 18. **A developer runs the demo with no private configuration at all.** It works, on synthetic
     data, writing nothing into the checkout. (FR 14.)
 19. **A self-hoster has one hostname and no wildcard certificate.** Single-host path mode is the
@@ -560,6 +574,8 @@ Each with its source. An assumption without a source is an open question, not a 
 | The work-in-motion predecessor runs Next.js with Drizzle over `better-sqlite3` | Resolved grill decision, verified in source | Sizes the port. |
 | The memory layer uses `sqlite-vec` and FTS5, not pgvector | Resolved grill decision, verified in source | The reason D9 exists. |
 | The maintainer prefers Python for domain services | Resolved grill decision | One of four inputs to D3; not the only one. |
+| The maintainer accepts `ClaudeCliRuntime` first and the OpenRouter adapter as a v1.0 requirement rather than a first-slice one | Resolved decision from the plan review that preceded this document | The source for the first entry under [Recorded changes of direction](#recorded-changes-of-direction). Without it, D4's rollout order is a preference with no recorded origin. |
+| The maintainer wants module boundaries visible in the address bar of the instance they use daily | Resolved decision from the plan review that preceded this document | The source for the second entry under [Recorded changes of direction](#recorded-changes-of-direction). It buys a routing table, not a deployment per module, and single-host path mode stays the default so guardrail 15 is unaffected. |
 | The reference instance is a single-server container deployment behind a reverse proxy with a wildcard certificate | Resolved grill decision | Makes guardrail 15 self-enforcing. |
 | Postgres extensions for vector and text search are available in the deployment | Implied by D1 and D9 | ASSUMED default: a standard Postgres image with pgvector available. If a target deployment cannot supply it, the retrieval adapter absorbs the change (FR 30). |
 | The first users hold an account with the chosen OAuth code host | Implied by D6 | ASSUMED default. The identity-provider boundary exists precisely because this stops being true for later personas. |
