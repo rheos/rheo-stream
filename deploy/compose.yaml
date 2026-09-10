@@ -36,8 +36,11 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+    # Host port is parameterised for the same reason as postgres's: an unrelated
+    # process on this machine may already hold 8000. The container always
+    # listens on 8000 internally; only the host-side publish moves.
     ports:
-      - "8000:8000"
+      - "${RHEO_CORE_PORT:-8000}:8000"
     # `core` now makes a real database call in its lifespan (the control-chain
     # migration), so it must wait for postgres to be accepting connections, not
     # merely for the container to have started.

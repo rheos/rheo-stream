@@ -48,17 +48,27 @@ migrate:
 # outside compose — 0a does not containerize web, spec.md W1) compose without a
 # shared container. Starts postgres + core, polls (not a fixed sleep) for core to
 # answer and fails loudly if it never does, builds and starts web pointed at the
-# published core, then asserts both seams: core answers /healthz and the web page
-# renders the *healthy* core seam ("contract v...") rather than merely returning
-# 200 (the shell 200s even when it can't reach core). Always tears web and compose
-# down via an EXIT trap. The named Postgres volume means this writes nothing into
-# the tracked tree.
+# published core, then asserts both seams: core answers /healthz with a body only
+# our service returns (a bare 200 could come from an unrelated process already
+# holding the port) and the web page renders the *healthy* core seam ("contract
+# v...") rather than merely returning 200 (the shell 200s even when it can't reach
+# core). Host ports are all overridable (RHEO_PG_PORT/RHEO_CORE_PORT/
+# RHEO_WEB_PORT) for a machine where a default is already taken by something
+# else. Hermetic: the EXIT trap always tears down web, containers, the two named
+# volumes (`down -v`, unlike the plain `down` target, which deliberately leaves a
+# developer's data alone) and the `.rheo-local` directory this target's operator
+# sequence creates — so `make demo` is repeatable (a fixed --subject would
+# otherwise collide with the previous run's account on the second invocation) and
+# writes nothing durable outside the tracked tree.
 demo:
 	@set -e; \
+	core_port="$${RHEO_CORE_PORT:-8000}"; \
+	web_port="$${RHEO_WEB_PORT:-3000}"; \
 	WEB_PID=""; \
 	cleanup() { \
 		if [ -n "$$WEB_PID" ]; then kill "$$WEB_PID" 2>/dev/null || true; fi; \
-		$(MAKE) down || true; \
+		docker compose -f deploy/compose.yaml down -v || true; \
+		rm -rf .rheo-local; \
 	}; \
 	trap cleanup EXIT; \
 	$(MAKE) up; \
@@ -91,31 +101,31 @@ demo:
 	echo "Waiting for core /healthz..."; \
 	core_up=0; \
 	for _ in $$(seq 1 60); do \
-		if curl -sf http://localhost:8000/healthz >/dev/null 2>&1; then core_up=1; break; fi; \
+		if curl -sf "http://localhost:$$core_port/healthz" 2>/dev/null | grep -q '"contract_version"'; then core_up=1; break; fi; \
 		sleep 1; \
 	done; \
 	if [ "$$core_up" != 1 ]; then \
-		echo "FAIL  core  http://localhost:8000/healthz did not become ready within 60s"; \
+		echo "FAIL  core  http://localhost:$$core_port/healthz did not become ready within 60s"; \
 		exit 1; \
 	fi; \
-	RHEO_CORE_INTERNAL_URL=http://localhost:8000 pnpm -C apps/web build; \
-	RHEO_CORE_INTERNAL_URL=http://localhost:8000 pnpm -C apps/web start & \
+	RHEO_CORE_INTERNAL_URL="http://localhost:$$core_port" PORT="$$web_port" pnpm -C apps/web build; \
+	RHEO_CORE_INTERNAL_URL="http://localhost:$$core_port" PORT="$$web_port" pnpm -C apps/web start & \
 	WEB_PID=$$!; \
 	rc=0; \
-	if curl -sf http://localhost:8000/healthz >/dev/null 2>&1; then \
-		echo "PASS  core  http://localhost:8000/healthz"; \
+	if curl -sf "http://localhost:$$core_port/healthz" 2>/dev/null | grep -q '"contract_version"'; then \
+		echo "PASS  core  http://localhost:$$core_port/healthz"; \
 	else \
-		echo "FAIL  core  http://localhost:8000/healthz"; rc=1; \
+		echo "FAIL  core  http://localhost:$$core_port/healthz"; rc=1; \
 	fi; \
 	web_ok=0; \
 	for _ in $$(seq 1 30); do \
-		if curl -s http://localhost:3000/ | grep -q 'contract v'; then web_ok=1; break; fi; \
+		if curl -s "http://localhost:$$web_port/" | grep -q 'contract v'; then web_ok=1; break; fi; \
 		sleep 1; \
 	done; \
 	if [ "$$web_ok" = 1 ]; then \
-		echo "PASS  web   http://localhost:3000/ (core seam healthy: contract v present)"; \
+		echo "PASS  web   http://localhost:$$web_port/ (core seam healthy: contract v present)"; \
 	else \
-		echo "FAIL  web   http://localhost:3000/ never rendered the healthy core seam (contract v)"; rc=1; \
+		echo "FAIL  web   http://localhost:$$web_port/ never rendered the healthy core seam (contract v)"; rc=1; \
 	fi; \
 	exit $$rc
 
