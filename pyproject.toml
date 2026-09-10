@@ -1,11 +1,13 @@
 # Virtual workspace root. Nothing installs from the root itself; it only ties the
 # member distributions together and holds the shared Python tool configuration.
-# `members` is scoped to what C1 creates on purpose: `uv lock`/`uv sync` errors on a
-# workspace member glob that resolves to a directory with no `pyproject.toml`, and the
-# app/module/connector/runtime directories carry none until C2. C2 extends this list.
+# Every glob below resolves only to directories that now carry a `pyproject.toml`.
+# `apps/web` is a Next.js (pnpm) app with no `pyproject.toml` (03 creates it), so it
+# is excluded here so `uv sync`/`uv lock` do not treat it as a Python member once it
+# lands. `packs/` is data-only and is deliberately not a member.
 
 [tool.uv.workspace]
-members = ["packages/*"]
+members = ["packages/*", "apps/*", "modules/*", "connectors", "runtimes", "channels"]
+exclude = ["apps/web"]
 
 [dependency-groups]
 dev = [
@@ -30,10 +32,41 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.mypy]
 strict = true
 python_version = "3.12"
-files = ["packages"]
+# The four Python `apps/*` directories are named explicitly rather than a bare
+# `apps` glob: mypy has no default `node_modules` exclusion and does not read
+# `.gitignore`, so a bare `apps` glob would recurse into `apps/web/node_modules`
+# once 04's `pnpm install` runs. Naming the four Python dirs keeps `apps/web`
+# (03 creates it) out of mypy's walk with no exclusion regex to maintain.
+files = [
+    "packages",
+    "apps/core",
+    "apps/worker",
+    "apps/mcp",
+    "apps/cli",
+    "modules",
+    "connectors",
+    "runtimes",
+    "channels",
+]
 # src layout: resolve each distribution by the name under its own `src/` directory
-# rather than as a dotted path from the repo root.
-mypy_path = ["packages/contracts/src", "packages/core/src"]
+# rather than as a dotted path from the repo root. Every source-layout member's
+# `src/` is a package base so cross-distribution imports (e.g. apps/core importing
+# rheo_app_mcp) resolve to the top-level package name, not a dotted repo path.
+mypy_path = [
+    "packages/contracts/src",
+    "packages/core/src",
+    "apps/core/src",
+    "apps/worker/src",
+    "apps/mcp/src",
+    "apps/cli/src",
+    "modules/recallatron/src",
+    "modules/relationships/src",
+    "modules/leads/src",
+    "modules/current/src",
+    "connectors/src",
+    "runtimes/src",
+    "channels/src",
+]
 explicit_package_bases = true
 
 [tool.pytest.ini_options]
