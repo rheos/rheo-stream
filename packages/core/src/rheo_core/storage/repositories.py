@@ -160,8 +160,9 @@ def insert_workspace_setting_if_absent(
             updated_at=_now(),
         )
         .on_conflict_do_nothing(index_elements=[c.workspace_setting.c.key])
+        .returning(c.workspace_setting.c.key)
     )
-    return conn.execute(statement).rowcount == 1
+    return conn.execute(statement).first() is not None
 
 
 def member_settings(conn: Connection, account_id: UUID) -> dict[str, str]:

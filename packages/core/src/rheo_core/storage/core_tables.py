@@ -43,6 +43,11 @@ def _timestamptz() -> DateTime:
     return DateTime(timezone=True)
 
 
+def _in(column: str, values: tuple[str, ...]) -> str:
+    quoted = ", ".join(f"'{value}'" for value in values)
+    return f"{column} IN ({quoted})"
+
+
 # One row: ``singleton`` is always true, checked, and uniquely indexed, so a second
 # insert fails on the index rather than silently producing two compositions.
 workspace_composition = Table(
@@ -66,13 +71,16 @@ module_state = Table(
     Column("enabled_at", _timestamptz(), nullable=True),
     Column("disabled_at", _timestamptz(), nullable=True),
     Column("state_detail", Text, nullable=True),
-    CheckConstraint(
-        "state IN ('installed', 'enabled', 'disabled', 'removed')",
-        name="module_state_state",
-    ),
+    CheckConstraint(_in("state", MODULE_STATES), name="module_state_state"),
 )
 
-# One row per applied migration step; the latest row is the current version.
+# One row per applied migration step; the latest row is the current version. The
+# primary key ``(module_id, schema_version)`` is this run's addition to the ratified
+# column list: it keeps duplicate history rows out, and forbids recording the same
+# step applied twice, which cannot happen before phase 2 because no module exists.
+# If a phase-2 re-apply ever needs recording, the key becomes
+# ``(module_id, schema_version, applied_at)`` by an appended revision; the ratified
+# columns are unchanged either way.
 module_schema_version = Table(
     "module_schema_version",
     core_metadata,

@@ -1,11 +1,8 @@
 """Alembic environment for the ``control`` chain.
 
-Runs only under ``rheo_core.migrations.orchestrator``, which passes the live connection
-through ``config.attributes["connection"]``. There is no ``alembic.ini``, no
-``sqlalchemy.url`` is ever read, and without the orchestrator there is no connection:
-Alembic invoked by hand refuses here with a ``RuntimeError`` and nothing is upgraded.
-The version table lives inside the chain's own schema,
-``control.alembic_version_control``.
+Runs only under the orchestrator's connection and refuses otherwise; the rule and
+its reasons are stated once, in ``rheo_core.migrations``. The version table lives
+inside the chain's own schema, ``control.alembic_version_control``.
 """
 
 from alembic import context

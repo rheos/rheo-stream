@@ -106,7 +106,7 @@ def test_a_workspace_setting_write_in_a_leaves_b_unchanged(
     cluster: ClusterSession, two_workspaces: tuple[WorkspaceRow, WorkspaceRow]
 ) -> None:
     a, b = two_workspaces
-    source = PostgresOverrideSource(cluster.backend)
+    source = PostgresOverrideSource()
     count_before = setting_row_count(cluster, b)
     value_before = resolve(workspace_id=b.id, source=source)[HARNESS_EXPLICIT]
     assert (count_before, value_before) == (1, "harness-package-default")
@@ -193,7 +193,9 @@ def test_unit_of_work_is_one_transaction_with_commit_and_rollback_only(
 
 def test_unit_of_work_has_no_outbox_or_audit_attachment_point() -> None:
     public = {name for name in dir(UnitOfWork) if not name.startswith("_")}
-    assert public == {"commit", "connection", "rollback"}
+    # ``verify_database`` is a class-level bool flag, not an attachment point.
+    assert public == {"commit", "connection", "rollback", "verify_database"}
+    assert isinstance(UnitOfWork.verify_database, bool)
     slots = set(UnitOfWork.__slots__)
     assert slots == {"_connection", "_engine", "_expected_database", "_transaction"}
     assert not any("outbox" in slot or "audit" in slot for slot in slots)
@@ -233,3 +235,28 @@ def test_pool_keys_engines_by_database_name_and_evicts_the_least_recent(
         small.dispose_all()
     with pytest.raises(ValueError, match="identifiers"):
         small.engine_for("ws_not-valid")
+
+
+# --- the assertion flag is resolved once ----------------------------------------------
+
+
+def test_database_assertion_is_resolved_once_not_per_unit_of_work(
+    cluster: ClusterSession,
+    two_workspaces: tuple[WorkspaceRow, WorkspaceRow],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    a, b = two_workspaces
+    assert cluster.backend.verify_database is True
+    assert UnitOfWork.verify_database is True
+    # A profile change after startup changes nothing: there is no per-transaction
+    # profile read, so the mismatch is still refused.
+    monkeypatch.setenv("RHEO_PROFILE", "production")
+    with pytest.raises(StorageRefusal) as excinfo:
+        with UnitOfWork(engine_for(cluster, a), b.database_name):
+            pass
+    assert excinfo.value.state == DATABASE_MISMATCH
+    # With the flag off (as a production backend sets it) the probe is skipped.
+    monkeypatch.setattr(UnitOfWork, "verify_database", False)
+    with UnitOfWork(engine_for(cluster, a), b.database_name) as uow:
+        actual = uow.connection.execute(text("SELECT current_database()")).scalar_one()
+        assert actual == a.database_name

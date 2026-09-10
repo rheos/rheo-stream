@@ -63,7 +63,7 @@ def write_member_row(
 def test_workspace_row_overrides_the_deployment_value_for_a_workspace_key(
     cluster: ClusterSession, workspace: UUID, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source = PostgresOverrideSource(cluster.backend)
+    source = PostgresOverrideSource()
     # Provisioning step 4 wrote the explicit row from the package default.
     assert dict(source.workspace_overrides(workspace)) == {
         HARNESS_EXPLICIT: "harness-package-default"
@@ -86,7 +86,7 @@ def test_workspace_row_overrides_the_deployment_value_for_a_workspace_key(
 def test_floored_workspace_row_is_clamped_by_the_deployment_value_on_read(
     cluster: ClusterSession, workspace: UUID
 ) -> None:
-    source = PostgresOverrideSource(cluster.backend)
+    source = PostgresOverrideSource()
     assert resolve(workspace_id=workspace, source=source)[HARNESS_FLOOR_MIN] == 100
     write_workspace_row(cluster, workspace, HARNESS_FLOOR_MIN, "50", ValueType.INT)
     assert resolve(workspace_id=workspace, source=source)[HARNESS_FLOOR_MIN] == 50
@@ -97,7 +97,7 @@ def test_floored_workspace_row_is_clamped_by_the_deployment_value_on_read(
 def test_member_row_applies_to_a_member_key_for_that_account_only(
     cluster: ClusterSession, workspace: UUID, owner_account_id: UUID
 ) -> None:
-    source = PostgresOverrideSource(cluster.backend)
+    source = PostgresOverrideSource()
     other_account = uuid7()
     write_member_row(
         cluster,
@@ -140,7 +140,7 @@ def test_member_row_applies_to_a_member_key_for_that_account_only(
 def test_deployment_scope_key_with_a_row_is_ignored(
     cluster: ClusterSession, workspace: UUID, caplog: pytest.LogCaptureFixture
 ) -> None:
-    source = PostgresOverrideSource(cluster.backend)
+    source = PostgresOverrideSource()
     caplog.set_level(logging.WARNING, logger="rheo_core.settings")
     write_workspace_row(
         cluster, workspace, "storage.pool_cache_size", "1", ValueType.INT
@@ -170,7 +170,7 @@ def test_source_routes_like_storage_and_refuses_a_non_active_workspace(
     workspace_id = uuid7()
     with pytest.raises(Halt):
         make_workspace(workspace_id=workspace_id, after_step=stop_after_create_database)
-    source = PostgresOverrideSource(cluster.backend)
+    source = PostgresOverrideSource()
     with pytest.raises(StorageRefusal) as excinfo:
         source.workspace_overrides(workspace_id)
     assert excinfo.value.state == WORKSPACE_UNAVAILABLE

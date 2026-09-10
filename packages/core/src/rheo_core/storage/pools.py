@@ -75,13 +75,6 @@ class EnginePool:
         with self._lock:
             return tuple(self._engines)
 
-    def discard(self, database_name: str) -> None:
-        """Dispose and forget the engine for ``database_name``, if cached."""
-        with self._lock:
-            engine = self._engines.pop(database_name, None)
-        if engine is not None:
-            engine.dispose()
-
     def dispose_all(self) -> None:
         with self._lock:
             engines = list(self._engines.values())

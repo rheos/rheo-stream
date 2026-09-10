@@ -4,8 +4,8 @@ Revision ID: ${up_revision}
 Revises: ${down_revision | comma,n}
 Create Date: ${create_date}
 
-Generated through ``rheo_core.migrations.orchestrator.build_config()``: this chain has
-no ``alembic.ini`` and no console script. Downgrade is not supported in release one.
+Generated through ``rheo_core.migrations.orchestrator.build_config()`` (no Alembic by
+hand: see ``rheo_core.migrations``). Downgrade is not supported in release one.
 """
 
 from collections.abc import Sequence

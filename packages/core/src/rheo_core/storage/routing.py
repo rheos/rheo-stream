@@ -20,7 +20,8 @@ from rheo_contracts import WorkspaceContext
 from sqlalchemy import Engine
 
 from rheo_core.storage.backend import WORKSPACE_UNAVAILABLE, StorageRefusal, UnitOfWork
-from rheo_core.storage.control_plane import WorkspaceRow, WorkspaceState, get_workspace
+from rheo_core.storage.control_plane import WorkspaceRow, get_workspace
+from rheo_core.storage.control_tables import WorkspaceState
 from rheo_core.storage.postgres import get_backend
 
 

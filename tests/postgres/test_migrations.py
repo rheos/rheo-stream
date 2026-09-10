@@ -15,6 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 from uuid import UUID
 
+import psycopg.errors
 import pytest
 from alembic import command
 from conftest import REMEDY, ClusterSession, MakeWorkspace, run_pytest_in_subprocess
@@ -33,6 +34,8 @@ from rheo_core.migrations.orchestrator import (
     run_chain,
     script_location,
 )
+from rheo_core.refs import uuid7
+from rheo_core.storage import control_tables
 from rheo_core.storage.backend import (
     DATABASE_MISMATCH,
     SCHEMA_AHEAD,
@@ -40,11 +43,12 @@ from rheo_core.storage.backend import (
     WORKSPACE_UNAVAILABLE,
     StorageRefusal,
 )
-from rheo_core.storage.control_plane import WorkspaceState
+from rheo_core.storage.control_tables import WORKSPACE_STATES, WorkspaceState
 from rheo_core.storage.postgres import advisory_lock
 from rheo_core.storage.provisioning import repair
 from rheo_core.storage.routing import active_workspace
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, text, update
+from sqlalchemy.exc import IntegrityError
 
 pytestmark = pytest.mark.postgres
 
@@ -117,11 +121,26 @@ def wait_until(condition: Callable[[], bool], *, timeout: float) -> bool:
 
 
 @pytest.mark.parametrize("chain", CHAINS)
-def test_env_refuses_without_the_orchestrator_connection(chain: str) -> None:
+def test_env_refuses_without_the_orchestrator_connection(
+    cluster: ClusterSession, chain: str
+) -> None:
     config = build_config(chain)
     assert config.get_main_option("sqlalchemy.url") is None
+    # The attack: a hand-written ini carrying a real cluster URL. The environment
+    # never reads it, so it must still refuse, and nothing may be upgraded.
+    real_url = cluster.backend.pools.cluster_url.render_as_string(hide_password=False)
+    config.set_main_option("sqlalchemy.url", real_url)
     with pytest.raises(RuntimeError, match="orchestrator"):
         command.upgrade(config, "head")
+    with cluster.backend.maintenance_connection() as connection:
+        for qualified in (
+            "control.alembic_version_control",
+            "core.alembic_version_core",
+        ):
+            present = connection.execute(
+                text("SELECT to_regclass(:name)"), {"name": qualified}
+            ).scalar_one()
+            assert present is None, f"{qualified} appeared in the maintenance database"
 
 
 def test_no_alembic_ini_is_tracked_and_each_chain_knows_one_revision() -> None:
@@ -378,3 +397,102 @@ def test_suite_fails_fast_when_the_cluster_is_unreachable() -> None:
     assert "unreachable" in output, output
     assert " passed" not in output, output
     assert "skipped" not in output, output
+
+
+# --- the lock is taken before any DDL -------------------------------------------------
+
+
+def test_run_chain_takes_the_lock_before_creating_the_schema(
+    cluster: ClusterSession,
+) -> None:
+    """``CREATE SCHEMA IF NOT EXISTS`` is not race-safe; it must run under the lock.
+
+    A bare database (no registry row, no ``core`` schema) has one migrator queued on
+    the advisory lock. While queued its transaction must have written nothing, so no
+    transaction id is assigned yet; in the racy order ``CREATE SCHEMA`` would already
+    have assigned one.
+    """
+    name = cluster.record(f"ws_{uuid7().hex}")
+    assert cluster.backend.ensure_database(
+        name, template=cluster.backend.template_database
+    )
+    engine = cluster.backend.pools.engine_for(name)
+    key_high, key_low = ADVISORY_LOCK_KEY >> 32, ADVISORY_LOCK_KEY & 0xFFFFFFFF
+
+    def waiter_pid() -> int | None:
+        with engine.connect() as connection:
+            found = connection.execute(
+                text(
+                    "SELECT pid FROM pg_locks WHERE locktype = 'advisory' "
+                    "AND database = (SELECT oid FROM pg_database WHERE datname = :db) "
+                    "AND classid = CAST(:hi AS oid) AND objid = CAST(:lo AS oid) "
+                    "AND NOT granted"
+                ),
+                {"db": name, "hi": key_high, "lo": key_low},
+            ).scalar()
+        return None if found is None else int(found)
+
+    def has_written(pid: int) -> bool:
+        # A transaction that has done no write holds only a virtual xid; the first
+        # catalog insert (``CREATE SCHEMA``) assigns a real one.
+        with engine.connect() as connection:
+            assigned = connection.execute(
+                text(
+                    "SELECT backend_xid IS NOT NULL FROM pg_stat_activity "
+                    "WHERE pid = :pid"
+                ),
+                {"pid": pid},
+            ).scalar_one()
+        return bool(assigned)
+
+    holder = engine.connect()
+    holder.begin()
+    advisory_lock(holder, ADVISORY_LOCK_KEY)
+    outcome: dict[str, object] = {}
+
+    def second_migrator() -> None:
+        try:
+            with engine.begin() as connection:
+                run_chain(connection, CORE_CHAIN, expected_database=name)
+            outcome["ok"] = True
+        except BaseException as exc:  # surfaced through the assertions below
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=second_migrator)
+    thread.start()
+    try:
+        assert wait_until(lambda: waiter_pid() is not None, timeout=10)
+        pid = waiter_pid()
+        assert pid is not None
+        assert not has_written(pid), "CREATE SCHEMA ran before the lock"
+    finally:
+        holder.rollback()
+        holder.close()
+    thread.join(30)
+    assert not thread.is_alive()
+    assert outcome.get("ok") is True, outcome.get("error")
+    assert tables_in(engine, "core") == CORE_TABLES | {"alembic_version_core"}
+
+
+def test_workspace_state_constraint_agrees_with_the_enum(
+    cluster: ClusterSession, workspace: UUID
+) -> None:
+    """The check constraint is built from ``WorkspaceState``: every member is
+    accepted by the database and nothing outside the enum is."""
+    assert WORKSPACE_STATES == tuple(state.value for state in WorkspaceState)
+    engine = cluster.backend.control_engine
+    row = control_tables.workspace
+    for state in WorkspaceState:
+        with engine.connect() as connection:
+            connection.execute(
+                update(row).where(row.c.id == workspace).values(state=state.value)
+            )
+            connection.rollback()  # probed, never persisted
+    with engine.connect() as connection:
+        with pytest.raises(IntegrityError) as excinfo:
+            connection.execute(
+                update(row).where(row.c.id == workspace).values(state="archived")
+            )
+        assert isinstance(excinfo.value.orig, psycopg.errors.CheckViolation)
+        connection.rollback()
+    assert cluster.registry_row(workspace).state is WorkspaceState.ACTIVE

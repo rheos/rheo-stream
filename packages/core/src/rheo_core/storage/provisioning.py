@@ -12,9 +12,9 @@ walks by name:
 2. ``create_database`` — ``CREATE DATABASE <name> TEMPLATE <storage.template_database>``
    on the autocommit maintenance connection; "already exists" with a row still in
    ``provisioning`` is a retry and continues.
-3. ``migrate_core`` — ``CREATE SCHEMA IF NOT EXISTS core``, the ``core`` chain through
-   the orchestrator, then ``workspace_composition`` with the installed ``rheo-core``
-   distribution version and ``CONTRACT_VERSION``.
+3. ``migrate_core`` — the ``core`` chain through the orchestrator (which creates the
+   ``core`` schema under its lock), then ``workspace_composition`` with the installed
+   ``rheo-core`` distribution version and ``CONTRACT_VERSION``.
 4. ``write_default_settings`` — the ``explicit_per_workspace`` rows from the key
    registry's package defaults, inserted only where absent.
 5. ``activate`` — the row goes ``active``.
@@ -40,7 +40,6 @@ from typing import Final
 from uuid import UUID
 
 from rheo_contracts import CONTRACT_VERSION, Role
-from sqlalchemy import text
 
 from rheo_core.migrations.orchestrator import CORE_CHAIN, run_chain
 from rheo_core.settings import REGISTRY, current_profile, encode_text
@@ -52,8 +51,8 @@ from rheo_core.storage.backend import (
     StorageRefusal,
     UnitOfWork,
 )
-from rheo_core.storage.control_plane import WorkspaceRow, WorkspaceState
-from rheo_core.storage.core_tables import CORE_SCHEMA
+from rheo_core.storage.control_plane import WorkspaceRow
+from rheo_core.storage.control_tables import WorkspaceState
 from rheo_core.storage.postgres import PostgresBackend, get_backend
 
 STEP_INSERT_REGISTRY_ROW: Final = "insert_registry_row"
@@ -141,7 +140,7 @@ def _step_insert_registry_row(
     if owner_account_id is None or slug is None:
         raise ValueError("step 1 needs the owner account and the slug")
     with backend.control_engine.begin() as connection:
-        row = control_plane.insert_workspace_if_absent(
+        row, inserted = control_plane.insert_workspace_if_absent(
             connection,
             workspace_id=workspace_id,
             slug=slug,
@@ -154,12 +153,25 @@ def _step_insert_registry_row(
                 WORKSPACE_EXISTS,
                 f"workspace {workspace_id} already exists in state {row.state.value}",
             )
-        control_plane.insert_membership_if_absent(
-            connection,
-            account_id=owner_account_id,
-            workspace_id=workspace_id,
-            role=Role.OWNER,
+        if inserted:
+            control_plane.insert_membership_if_absent(
+                connection,
+                account_id=owner_account_id,
+                workspace_id=workspace_id,
+                role=Role.OWNER,
+            )
+            return
+        # A retry of a crashed create: the owner row was committed with the
+        # workspace row, so the caller must be that owner. Inserting here instead
+        # would let a retry with a different account add a second owner.
+        existing = control_plane.get_membership(
+            connection, account_id=owner_account_id, workspace_id=workspace_id
         )
+        if existing is None or existing.role is not Role.OWNER:
+            raise StorageRefusal(
+                WORKSPACE_EXISTS,
+                f"workspace {workspace_id} is being provisioned for a different owner",
+            )
 
 
 def _step_create_database(backend: PostgresBackend, workspace_id: UUID) -> None:
@@ -185,7 +197,7 @@ def _step_migrate_core(backend: PostgresBackend, workspace_id: UUID) -> None:
     row = _registry_row(backend, workspace_id)
     engine = backend.pools.engine_for(row.database_name)
     with UnitOfWork(engine, row.database_name) as uow:
-        uow.connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {CORE_SCHEMA}"))
+        # The orchestrator creates the ``core`` schema itself, under its lock.
         run_chain(uow.connection, CORE_CHAIN, expected_database=row.database_name)
         repositories.write_composition(
             uow.connection,

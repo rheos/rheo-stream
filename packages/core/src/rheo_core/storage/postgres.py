@@ -30,7 +30,7 @@ from sqlalchemy.exc import ArgumentError, DBAPIError
 from sqlalchemy.pool import NullPool
 
 from rheo_core.secrets import SecretRef, SecretStore
-from rheo_core.settings import resolve
+from rheo_core.settings import PROFILE_KEY, resolve
 from rheo_core.storage.backend import StorageBackend, UnitOfWork
 from rheo_core.storage.data_root import resolve_data_root
 from rheo_core.storage.pools import EnginePool, check_database_name
@@ -102,8 +102,13 @@ class PostgresBackend:
         template_database: str,
         pool_cache_size: int,
         pool_max_connections: int,
+        verify_database: bool = False,
     ) -> None:
         self._cluster_url = cluster_url_from_dsn(cluster_url.render_as_string(False))
+        # Resolved once, here, and published to every unit of work: the profile is
+        # not re-read per transaction (see ``UnitOfWork.verify_database``).
+        self.verify_database = verify_database
+        UnitOfWork.verify_database = verify_database
         self.control_database = check_database_name(control_database)
         self.template_database = check_database_name(template_database)
         self.maintenance_database = check_database_name(str(self._cluster_url.database))
@@ -133,6 +138,7 @@ class PostgresBackend:
             template_database=settings.get_str(TEMPLATE_DATABASE_KEY),
             pool_cache_size=settings.get_int(POOL_CACHE_SIZE_KEY),
             pool_max_connections=settings.get_int(POOL_MAX_CONNECTIONS_KEY),
+            verify_database=settings.get_str(PROFILE_KEY) == "test",
         )
 
     # --- engines ----------------------------------------------------------------------

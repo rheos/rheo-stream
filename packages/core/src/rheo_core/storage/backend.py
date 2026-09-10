@@ -10,21 +10,20 @@ The unit of work takes an **engine and the expected database name**, not a conte
 ``routing.open_unit_of_work(ctx)`` composes ``route(ctx)`` with it; the split is what
 lets the storage tests drive the unit of work from an engine, because no test may
 hand-build a ``WorkspaceContext``. Under ``profile = test`` ``__enter__`` asserts
-``SELECT current_database()`` equals the expected name once per unit of work; that
+``SELECT current_database()`` equals the expected name once per unit of work (the
+profile is resolved once, by the backend: see ``UnitOfWork.verify_database``); that
 assertion plus the registry read in ``route()`` are the backstop for the run's worst
 silent failure, a write landing in the wrong workspace database.
 """
 
 from collections.abc import Callable, Sequence
 from types import TracebackType
-from typing import TYPE_CHECKING, Final, Protocol, Self
+from typing import TYPE_CHECKING, ClassVar, Final, Protocol, Self
 from uuid import UUID
 
 from rheo_contracts import WorkspaceContext
 from sqlalchemy import Connection, Engine, text
 from sqlalchemy.engine import Transaction
-
-from rheo_core.settings import current_profile
 
 if TYPE_CHECKING:
     from rheo_core.migrations.orchestrator import MigrationResult
@@ -62,6 +61,16 @@ class UnitOfWork:
 
     __slots__ = ("_connection", "_engine", "_expected_database", "_transaction")
 
+    verify_database: ClassVar[bool] = False
+    """Whether ``__enter__`` probes ``current_database()`` against the expected name.
+
+    ``PostgresBackend`` sets this once at construction from the resolved profile: on
+    under ``test``, off otherwise. A class-level flag rather than a per-transaction
+    ``current_profile()`` call, because that helper re-reads ``deployment.toml`` and
+    the environment on every call, which would be a file read per database
+    transaction in production.
+    """
+
     def __init__(self, engine: Engine, expected_database: str) -> None:
         if not isinstance(expected_database, str) or not expected_database:
             raise TypeError("UnitOfWork needs the expected database name")
@@ -75,7 +84,7 @@ class UnitOfWork:
             raise StorageRefusal(UNIT_OF_WORK_CLOSED, "a unit of work is entered once")
         connection = self._engine.connect()
         transaction = connection.begin()
-        if current_profile() == "test":
+        if UnitOfWork.verify_database:
             actual = str(
                 connection.execute(text("SELECT current_database()")).scalar_one()
             )

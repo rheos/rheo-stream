@@ -3,15 +3,16 @@
 Per chain it builds an ``alembic.config.Config`` in memory, points ``script_location``
 at the chain's package directory (resolved through ``importlib.resources`` so the
 installed wheel works, not just the checkout), and hands the live connection to the
-environment through ``config.attributes["connection"]``. Nothing ever reads
-``sqlalchemy.url``. Before upgrading it:
+environment through ``config.attributes["connection"]`` (the no-Alembic-by-hand rule
+this serves is stated once, in ``rheo_core.migrations``). Before upgrading it:
 
 - asserts ``SELECT current_database()`` equals the intended database name, the
   defence against a wrong-pool bug migrating the wrong database;
 - takes the transaction-scoped advisory lock ``ADVISORY_LOCK_KEY`` on that database's
-  connection, so two core replicas, or a replica and the operator command, cannot
-  interleave (the lock is released when the migration transaction ends; a
-  session-level unlock could not run after a failed statement aborted the transaction);
+  connection **before** any DDL, so two core replicas, or a replica and the operator
+  command, cannot interleave (the lock is released when the migration transaction
+  ends; a session-level lock on a pooled connection would survive the pool's reset
+  ``ROLLBACK`` after a failed migration and hang the next migrator);
 - refuses ``schema_ahead`` when the database's version table names a revision the
   running code's script directory does not know.
 
@@ -46,12 +47,15 @@ from rheo_core.storage.backend import (
     StorageRefusal,
 )
 from rheo_core.storage.control_plane import (
-    WorkspaceState,
     get_workspace,
     list_workspaces,
     set_workspace_state,
 )
-from rheo_core.storage.control_tables import CONTROL_SCHEMA, CONTROL_VERSION_TABLE
+from rheo_core.storage.control_tables import (
+    CONTROL_SCHEMA,
+    CONTROL_VERSION_TABLE,
+    WorkspaceState,
+)
 from rheo_core.storage.core_tables import CORE_SCHEMA, CORE_VERSION_TABLE
 from rheo_core.storage.postgres import advisory_lock
 
@@ -152,8 +156,10 @@ def run_chain(connection: Connection, chain: str, *, expected_database: str) -> 
             "run_chain needs a connection inside a transaction the caller commits"
         )
     assert_current_database(connection, expected_database)
-    connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
+    # The lock comes first. ``CREATE SCHEMA IF NOT EXISTS`` is not race-safe on
+    # ``pg_namespace``, and serialising exactly that DDL is what the lock is for.
     advisory_lock(connection, ADVISORY_LOCK_KEY)
+    connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
     ahead = recorded_revisions(connection, chain) - known_revisions(chain)
     if ahead:
         raise StorageRefusal(

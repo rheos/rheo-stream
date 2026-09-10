@@ -18,7 +18,6 @@ clock in UTC.
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from enum import StrEnum
 from uuid import UUID
 
 import psycopg.errors
@@ -37,16 +36,7 @@ from rheo_core.storage.backend import (
     WORKSPACE_MISSING,
     StorageRefusal,
 )
-
-
-class WorkspaceState(StrEnum):
-    """The closed set the ``workspace.state`` check constraint enforces."""
-
-    PROVISIONING = "provisioning"
-    MIGRATING = "migrating"
-    ACTIVE = "active"
-    UNAVAILABLE = "unavailable"
-    RESTORING = "restoring"
+from rheo_core.storage.control_tables import WorkspaceState
 
 
 def _now() -> datetime:
@@ -234,9 +224,10 @@ def insert_workspace_if_absent(
     display_name: str,
     database_name: str,
     state_detail: str,
-) -> WorkspaceRow:
+) -> tuple[WorkspaceRow, bool]:
     """Insert the registry row in state ``provisioning``, or leave an existing row as
-    it is (a retry of a crashed create). Returns the row now present.
+    it is (a retry of a crashed create). Returns the row now present and whether this
+    call inserted it, so the caller can tell a fresh create from a retry.
 
     ``slug_taken`` when another workspace holds the slug. ``database_name`` is
     computed by provisioning and never accepted from any input; this function is the
@@ -256,9 +247,12 @@ def insert_workspace_if_absent(
             state_detail=state_detail,
         )
         .on_conflict_do_nothing(index_elements=[t.workspace.c.id])
+        .returning(t.workspace.c.id)
     )
     try:
-        conn.execute(statement)
+        # RETURNING yields a row only when the insert happened; ``rowcount`` is not
+        # a reliable signal for an ``ON CONFLICT DO NOTHING`` insert.
+        inserted = conn.execute(statement).first() is not None
     except IntegrityError as exc:
         if isinstance(exc.orig, psycopg.errors.UniqueViolation) and (
             "slug" in _constraint_name(exc)
@@ -270,7 +264,7 @@ def insert_workspace_if_absent(
     row = get_workspace(conn, workspace_id)
     if row is None:  # pragma: no cover - the insert or the existing row is visible
         raise StorageRefusal(WORKSPACE_MISSING, f"workspace {workspace_id} vanished")
-    return row
+    return row, inserted
 
 
 def get_workspace(conn: Connection, workspace_id: UUID) -> WorkspaceRow | None:

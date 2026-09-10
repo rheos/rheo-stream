@@ -12,6 +12,7 @@ Six of the ten (``session``, ``session_secret``, ``session_grant``, ``access_tok
 SHA: their repository functions arrive in 0b2 with their callers and tests.
 """
 
+from enum import StrEnum
 from typing import Final
 
 from sqlalchemy import (
@@ -32,12 +33,23 @@ from sqlalchemy.dialects.postgresql import UUID
 CONTROL_SCHEMA: Final = "control"
 CONTROL_VERSION_TABLE: Final = "alembic_version_control"
 
-WORKSPACE_STATES: Final = (
-    "provisioning",
-    "migrating",
-    "active",
-    "unavailable",
-    "restoring",
+
+class WorkspaceState(StrEnum):
+    """The closed set of ``workspace.state`` values.
+
+    The check constraint below is built from this enum, so the enum and the
+    database cannot drift; ``control_plane.py`` reads and writes it by member.
+    """
+
+    PROVISIONING = "provisioning"
+    MIGRATING = "migrating"
+    ACTIVE = "active"
+    UNAVAILABLE = "unavailable"
+    RESTORING = "restoring"
+
+
+WORKSPACE_STATES: Final[tuple[str, ...]] = tuple(
+    state.value for state in WorkspaceState
 )
 MEMBERSHIP_ROLES: Final = ("owner", "member")
 TOKEN_KINDS: Final = ("cli", "mcp", "runtime")
