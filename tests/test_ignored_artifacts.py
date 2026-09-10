@@ -58,6 +58,15 @@ def rheo_local_artifacts() -> "list[str]":
     preexisting = rheo_local.exists()
     created: list[Path] = []
     for relative in relpaths:
+        # Enforce the module docstring's own rule before writing anything: a
+        # fixed literal path here would overwrite (then delete) real data at
+        # that path if it already existed. Nothing else in this suite or in
+        # check_repository.py checks this — it is otherwise pure discipline.
+        assert token in relative, (
+            f"fixture path {relative!r} does not carry the per-run token "
+            f"{token!r}; a fixed literal path here risks silently destroying "
+            "real .rheo-local/ data at that path"
+        )
         path = _REPO_ROOT / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("test artifact\n", encoding="utf-8")
