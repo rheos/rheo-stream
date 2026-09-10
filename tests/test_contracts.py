@@ -3,15 +3,16 @@
 Every later chunk imports these types, so the field names, the enum members and the
 reference grammar are pinned here rather than left to the first consumer to discover.
 
-One deliberate constraint on this file: it never builds a workspace context. C4 adds a
-repository-wide AST scan asserting that a context is constructed only under
-``packages/core/src/rheo_core/boundary/``, and ``tests/`` is inside that scan's root.
-The class-level assertions below (``model_config``, ``model_fields``) are attribute
-access, not construction, and are what belongs here; immutability of a real context is
-asserted in C4's ``tests/test_boundary.py`` against an instance from the boundary's own
-harness factory.
+One deliberate constraint on this file: it never builds a workspace context. A
+repository-wide AST scan asserts that a context is constructed only under
+``packages/core/src/rheo_core/boundary/``. The class-level assertions below
+(``model_config``, ``model_fields``) are attribute access, not construction, and are
+what belongs here; immutability of a real instance belongs beside the boundary that
+builds it.
 """
 
+import pickle
+import time
 from typing import get_args
 from uuid import UUID
 
@@ -82,10 +83,33 @@ def test_record_ref_core_segment_is_reserved_not_refused() -> None:
 
 
 def test_uuid7_version_and_variant_bits() -> None:
-    value = uuid7()
-    assert value.version == 7
-    assert (value.int >> 76) & 0xF == 0x7
-    assert (value.int >> 62) & 0b11 == 0b10
+    """Many mints, not one.
+
+    With the version or variant step removed those bits are whatever
+    ``secrets.token_bytes`` produced, so a single sample would still pass one time in
+    sixteen (version) or one in four (variant), and the mutation that proves this test
+    would come back green at random.
+    """
+    for _ in range(64):
+        value = uuid7()
+        assert value.version == 7
+        assert (value.int >> 76) & 0xF == 0x7
+        assert (value.int >> 62) & 0b11 == 0b10
+
+
+def test_uuid7_timestamp_is_wall_clock_milliseconds() -> None:
+    """Pin the top 48 bits, which the monotonic counter would otherwise mask.
+
+    Ordering alone cannot see a timestamp written little-endian, in seconds, or not at
+    all: the same-millisecond increment keeps the sequence rising whatever those bits
+    hold. B-tree locality is the whole reason for v7 over v4, so it gets its own lock.
+    """
+    before = time.time_ns() // 1_000_000
+    stamp = uuid7().int >> 80
+    after = time.time_ns() // 1_000_000
+    assert before - 2 <= stamp <= after + 2
+    time.sleep(0.002)
+    assert uuid7().int >> 80 > stamp
 
 
 def test_uuid7_is_strictly_increasing() -> None:
@@ -161,6 +185,7 @@ def test_all_operations_is_a_singleton() -> None:
     assert repr(ALL_OPERATIONS) == "ALL_OPERATIONS"
     with pytest.raises(RuntimeError):
         AllOperations()
+    assert pickle.loads(pickle.dumps(ALL_OPERATIONS)) is ALL_OPERATIONS
 
 
 def test_workspace_context_declares_exactly_the_ratified_fields() -> None:

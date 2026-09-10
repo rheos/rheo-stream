@@ -1,10 +1,8 @@
 """The ``WorkspaceContext`` type every boundary resolves, and the values it holds.
 
 ``WorkspaceContext`` is constructed in exactly one place:
-``packages/core/src/rheo_core/boundary/`` (C4). The AST scan that enforces that rule is
-rooted at the repository root and walks ``packages/``, ``apps/``, ``scripts/`` and
-``tests/``, so no test may hand-build a context either; tests obtain one from
-``context_for_operator`` or the ``profile = test``-gated ``context_for_harness``.
+``packages/core/src/rheo_core/boundary/``. A repository-wide AST scan enforces that, so
+nothing outside the boundary package — tests included — hand-builds a context.
 
 Field list and semantics come from ``docs/architecture/overview.md`` § The workspace
 context. Eight fields, no more: adding one here changes every boundary at once.
@@ -94,8 +92,9 @@ class AllOperations:
     authorization test is an identity check (``ctx.operation_set is ALL_OPERATIONS``)
     that no supplied string can satisfy. A second construction raises.
 
-    ``__copy__``/``__deepcopy__`` return the singleton: without them, copying a context
-    would route through ``__new__`` and hit the second-construction guard.
+    ``__copy__``/``__deepcopy__`` return the singleton and ``__reduce__`` returns the
+    module-global name: without them, copying or pickling a context would route through
+    ``__new__`` and hit the second-construction guard, failing far from the cause.
     """
 
     def __new__(cls) -> Self:
@@ -115,6 +114,11 @@ class AllOperations:
 
     def __deepcopy__(self, memo: dict[int, object]) -> Self:
         return self
+
+    def __reduce__(self) -> str:
+        # A string return tells pickle to resolve this module global by name, so
+        # unpickling reuses the singleton instead of calling ``__new__``.
+        return "ALL_OPERATIONS"
 
 
 ALL_OPERATIONS = AllOperations()

@@ -19,10 +19,11 @@ def uuid7() -> UUID:
     """Mint a UUIDv7: 48-bit big-endian Unix-ms timestamp, version 7, variant 10.
 
     Strictly increasing, including within a single millisecond and across a backwards
-    clock step. That is RFC 9562 §6.2's dedicated-counter method, applied to the low
-    bits of ``rand_b``: incrementing the previous value by one cannot disturb the
-    version or variant bits without 2**62 mints inside one millisecond, and it is what
-    keeps B-tree inserts local when a batch of rows is created together.
+    clock step. That is RFC 9562 §6.2 Method 2, monotonic random with a fixed
+    increment, applied to the low bits of ``rand_b``: incrementing the previous value
+    by one cannot disturb the version or variant bits without 2**62 mints inside one
+    millisecond, and it is what keeps B-tree inserts local when a batch of rows is
+    created together.
     """
     global _LAST
     timestamp_ms = time.time_ns() // 1_000_000
