@@ -1,0 +1,19 @@
+[project]
+name = "rheo-app-mcp"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+# Contracts only. No rheo-core dependency in 0a: there is no service registry to
+# call yet, and the narrowest possible dependency set is what makes
+# tests/test_mcp_boundary.py a meaningful boundary check rather than a vacuous one
+# (criterion 20). The registry (rheo_core.operations) becomes a dependency in 0c.
+dependencies = ["rheo-contracts"]
+
+[tool.uv.sources]
+rheo-contracts = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rheo_app_mcp"]

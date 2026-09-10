@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Check repository paths and local docs; this is not a content/secret scanner."""
 
-from pathlib import Path
 import re
 import subprocess
 import sys
+from pathlib import Path
 from urllib.parse import unquote, urlsplit
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -58,6 +57,14 @@ PRIVATE_PATHS = (
     "service.log",
     "runtime/agent.log",
     ".bureau/runs/example/state.json",
+    # Build, dependency, and test caches the 0a tree generates.
+    ".venv/pyvenv.cfg",
+    "node_modules/.bin/pnpm",
+    "apps/web/.next/BUILD_ID",
+    "apps/web/next-env.d.ts",
+    ".ruff_cache/CACHEDIR.TAG",
+    ".mypy_cache/CACHEDIR.TAG",
+    ".pytest_cache/CACHEDIR.TAG",
 )
 
 PUBLIC_PATHS = (
@@ -75,6 +82,24 @@ PUBLIC_PATHS = (
     "tests/fixtures/synthetic-leads.csv",
     "docs/example.pdf",
     "README.md",
+    # Public build and config files 0a's harness adds (asserted not ignored).
+    "pyproject.toml",
+    "uv.lock",
+    ".python-version",
+    "Makefile",
+    "packages/contracts/pyproject.toml",
+    "packages/core/pyproject.toml",
+    "apps/core/pyproject.toml",
+    "apps/worker/pyproject.toml",
+    "apps/cli/pyproject.toml",
+    "apps/mcp/pyproject.toml",
+    "pnpm-workspace.yaml",
+    "package.json",
+    "pnpm-lock.yaml",
+    ".nvmrc",
+    "apps/web/package.json",
+    "deploy/compose.yaml",
+    "Dockerfile",
 )
 
 
@@ -96,7 +121,10 @@ def ignored(paths):
     if not paths:
         return set()
     output = git(
-        "check-ignore", "--no-index", "-z", "--stdin",
+        "check-ignore",
+        "--no-index",
+        "-z",
+        "--stdin",
         input_text="\0".join(paths) + "\0",
     )
     return set(output.rstrip("\0").split("\0")) if output else set()
@@ -140,7 +168,9 @@ def check():
             # public link. Directories must contain at least one tracked file.
             present = target_relative in tracked_set or (
                 target.is_dir()
-                and any(p.startswith(target_relative.rstrip("/") + "/") for p in tracked)
+                and any(
+                    p.startswith(target_relative.rstrip("/") + "/") for p in tracked
+                )
             )
             if not present:
                 errors.append(f"Local link is not tracked: {relative} -> {link}")

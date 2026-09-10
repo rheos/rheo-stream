@@ -1,0 +1,16 @@
+[project]
+name = "rheo-core"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = ["rheo-contracts"]
+
+[tool.uv.sources]
+# rheo-contracts is a local workspace member, not published to any index.
+rheo-contracts = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rheo_core"]

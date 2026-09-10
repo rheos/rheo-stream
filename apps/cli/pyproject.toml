@@ -1,0 +1,17 @@
+[project]
+name = "rheo-app-cli"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+# Dependency-free in 0a: the stub calls nothing yet. Real commands (and their
+# dependency on rheo-core) arrive in 0c.
+dependencies = []
+
+[project.scripts]
+rheo = "rheo_app_cli.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rheo_app_cli"]
