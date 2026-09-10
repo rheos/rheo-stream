@@ -100,6 +100,33 @@ def list_module_states(conn: Connection) -> tuple[ModuleStateRow, ...]:
     return tuple(_module_state(row) for row in conn.execute(statement).mappings())
 
 
+@dataclass(frozen=True, slots=True)
+class ModuleSchemaVersionRow:
+    module_id: str
+    schema_version: str
+    applied_at: datetime
+    core_version_at_apply: str
+
+
+def list_module_schema_versions(
+    conn: Connection,
+) -> tuple[ModuleSchemaVersionRow, ...]:
+    """Every applied module step, oldest first (``core.workspace.status``'s reader;
+    the writer arrives with module chains in phase 2). Empty in this run."""
+    statement = select(c.module_schema_version).order_by(
+        c.module_schema_version.c.applied_at, c.module_schema_version.c.module_id
+    )
+    return tuple(
+        ModuleSchemaVersionRow(
+            module_id=row["module_id"],
+            schema_version=row["schema_version"],
+            applied_at=row["applied_at"],
+            core_version_at_apply=row["core_version_at_apply"],
+        )
+        for row in conn.execute(statement).mappings()
+    )
+
+
 # --- settings rows --------------------------------------------------------------------
 
 
