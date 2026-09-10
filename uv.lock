@@ -508,6 +508,12 @@ wheels = [
 name = "rheo-app-cli"
 version = "0.1.0"
 source = { editable = "apps/cli" }
+dependencies = [
+    { name = "rheo-core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "rheo-core", editable = "packages/core" }]
 
 [[package]]
 name = "rheo-app-core"

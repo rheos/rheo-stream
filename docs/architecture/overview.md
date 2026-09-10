@@ -238,10 +238,12 @@ Recorded here so a reader does not mistake them for oversights.
   isolation is refused on it until an operator-provided sandbox exists. That is honest rather
   than convenient, and a builder expecting the CLI to be the everything-runtime will meet it in
   criterion 15's test.
-- FR 12's precedence and floor are untested by any release-one acceptance criterion. The
-  write-time refusal and read-time clamp are unit-tested in phase one
-  ([storage](storage-and-workspaces.md#a5-configuration-precedence-and-the-policy-floor-fr-12));
-  the maintainer may want an acceptance criterion added when phase one is planned in detail.
+- FR 12's precedence and floor are tested by acceptance criterion 69, added to the build plan
+  (append-only) when phase one was planned in detail: one key set at each source resolves in
+  precedence order, a floored override looser than the deployment value is refused at write
+  time naming the key, and a stored row is clamped at read time once the deployment value
+  tightens, all driven end-to-end through the settings write path
+  ([storage](storage-and-workspaces.md#a5-configuration-precedence-and-the-policy-floor-fr-12)).
 - The purpose vocabulary is a closed enum until the framework-proof phase
   ([contact permission](intake-and-events.md#contact-permission-records-fr-46)).
 - `CREATE EXTENSION` needs a permitted database role; the remedy is a template database

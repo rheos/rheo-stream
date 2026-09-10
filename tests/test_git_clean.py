@@ -42,7 +42,7 @@ async def _exercise_startup() -> None:
     ) as client:
         response = await client.get("/healthz")
     assert response.status_code == 200
-    cli_main()
+    cli_main([])
 
 
 async def test_startup_writes_nothing_new_to_tracked_tree() -> None:

@@ -1,25 +1,56 @@
-"""FastAPI composition root for the `core` process.
+"""FastAPI composition root for the ``core`` process.
 
-0a exposes exactly one route, GET /healthz, so 03's web shell has a real endpoint
-to compose against. No database connection lives in this app; the boundary
-middleware, service registry, and MCP surface are 0c work.
+The module-level name ``app`` is the object ``tests/test_healthz.py`` and
+``tests/test_git_clean.py`` import; it stays bound here, built with the ``lifespan``
+below. The lifespan is an async context manager that runs ``startup.run_startup``
+once (off the event loop, it blocks on the database) between startup and shutdown,
+and disposes the storage backend's engines on the way out. ``GET /healthz`` stays a
+liveness probe with no database call.
 
-This module also imports rheo_core and rheo_app_mcp at module scope to establish
-the composition-root import edges the architecture draws — "apps/core... importing
-rheo_core/rheo_contracts and apps/mcp" (spec.md § System Components) — even though
-neither is called yet in 0a.
+``httpx``'s ASGI transport does not run ``lifespan``, which is why the 0a healthz
+tests stay database-free and why ``tests/postgres/test_cli.py`` drives the lifespan
+explicitly to prove the startup sequence.
+
+The ``/auth/*`` routes, ``/api/v1/operations``, the internal listener and ``serve()``
+are 0b2's; the MCP surface is 0c's. ``rheo_app_mcp`` is still imported at module
+scope to record the composition-root import edge the architecture draws.
 """
 
+import asyncio
+import contextlib
+from collections.abc import AsyncIterator
+
 import rheo_app_mcp
-import rheo_core
 from fastapi import FastAPI
 from rheo_contracts import CONTRACT_VERSION
+from rheo_core.storage.postgres import get_backend
 
-# Neither package is called in 0a; naming them here records the composition-root
-# import edges without leaving a bare unused import (ruff F401).
-_COMPOSITION_ROOT_EDGES = (rheo_core, rheo_app_mcp)
+from rheo_app_core.startup import run_startup
 
-app = FastAPI()
+# Not called in this run; naming it here records the composition-root import edge
+# without leaving a bare unused import (ruff F401).
+_COMPOSITION_ROOT_EDGES = (rheo_app_mcp,)
+
+
+def _dispose_backend() -> None:
+    # Shutdown disposes the backend's engines (pooled connections) and leaves the
+    # process-wide backend bound: its engines are recreated lazily on the next use,
+    # so a lifespan that runs again in the same process (tests) finds the same
+    # backend the session already holds.
+    get_backend().dispose()
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Startup sequence before the first request; dispose the engines at shutdown."""
+    app.state.startup = await asyncio.to_thread(run_startup)
+    try:
+        yield
+    finally:
+        await asyncio.to_thread(_dispose_backend)
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/healthz")
@@ -28,6 +59,7 @@ def healthz() -> dict[str, object]:
 
     The exact body shape {"status": "ok", "contract_version": <int>} is what 03's
     web shell fetches and parses; contract_version is rheo_contracts.CONTRACT_VERSION,
-    never a literal. tests/test_healthz.py pins it.
+    never a literal. tests/test_healthz.py pins it. No database call: liveness must
+    answer while the startup sequence or a workspace migration is still running.
     """
     return {"status": "ok", "contract_version": CONTRACT_VERSION}
