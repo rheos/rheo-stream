@@ -49,6 +49,8 @@ htmlcov/
 dist/
 build/
 .next/
+next-env.d.ts
+*.tsbuildinfo
 
 # Local editor/OS state.
 .DS_Store
