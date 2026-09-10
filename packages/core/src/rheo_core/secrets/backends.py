@@ -1,8 +1,10 @@
 """The two release-one backends: one file per id under ``<data_root>/secrets/``, and
 the environment. Both return raw bytes; the store wraps them in ``SecretValue``.
 
-A managed secret manager would be a third backend a deployment adds later; nothing in
-release one needs one.
+The ``secrets/`` directory itself (mode 0700) is created by the data-root layout,
+``rheo_core.storage.data_root.ensure_layout``, which is its single owner; the file
+backend only reads. A managed secret manager would be a third backend a deployment
+adds later; nothing in release one needs one.
 """
 
 import os
@@ -10,9 +12,14 @@ import stat
 from collections.abc import Mapping
 from pathlib import Path
 
-from rheo_core.secrets.refs import SECRET_MISSING, SECRET_PERMISSIONS, SecretRefusal
+from rheo_core.secrets.refs import (
+    SECRET_MISSING,
+    SECRET_PERMISSIONS,
+    SECRET_REF_MALFORMED,
+    SecretRefusal,
+    is_slug_path,
+)
 
-SECRETS_DIR_MODE = 0o700
 # Any bit outside owner read/write: group, other, or owner-execute.
 _BEYOND_OWNER_RW = 0o177
 
@@ -20,21 +27,22 @@ _BEYOND_OWNER_RW = 0o177
 class FileBackend:
     """``<root>/<id>``, read verbatim (write files with ``printf '%s'``, not ``echo``).
 
-    :meth:`ensure` creates the root with mode 0700. A file whose mode is looser than
-    0600 is ``secret_permissions``; a missing one is ``secret_missing`` naming the path.
-    Ids are validated slug paths (no ``..``, no absolute segment), so ``root / id``
-    cannot leave the root.
+    ``read`` validates the id as a slug path itself (lowercase slug segments only: no
+    ``..``, no empty segment, no absolute path), so ``root / id`` cannot leave the root
+    even for a caller that did not go through ``SecretRef``. A file whose mode is
+    looser than 0600 is ``secret_permissions``; a missing one is ``secret_missing``
+    naming the path.
     """
 
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
 
-    def ensure(self) -> Path:
-        self.root.mkdir(mode=SECRETS_DIR_MODE, parents=True, exist_ok=True)
-        self.root.chmod(SECRETS_DIR_MODE)
-        return self.root
-
     def read(self, ref_id: str) -> bytes:
+        if not is_slug_path(ref_id):
+            raise SecretRefusal(
+                SECRET_REF_MALFORMED,
+                "file secret id is not a slug path, so it may not name a path",
+            )
         path = self.root / ref_id
         try:
             info = path.stat()

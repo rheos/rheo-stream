@@ -21,6 +21,7 @@ from harness.settings_keys import (
     HARNESS_FLOOR_AND,
     HARNESS_FLOOR_MIN,
     HARNESS_FLOOR_UNION,
+    HARNESS_MEMBER,
     register_harness_keys,
 )
 from rheo_core.settings import (
@@ -48,10 +49,6 @@ from rheo_core.settings import (
 
 WORKSPACE = UUID("018f0000-0000-7000-8000-000000000001")
 ACCOUNT = UUID("018f0000-0000-7000-8000-000000000002")
-
-# The five harness keys are all workspace-scope, and no production key in this run is
-# member-scope, so the member-row path gets a test-local key under the same gate.
-MEMBER_KEY = "harness.member_preference"
 
 PRODUCTION_KEYS = {
     "storage.cluster_dsn_ref": "secret://env/RHEO_CLUSTER_DSN",
@@ -92,17 +89,6 @@ def data_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     root = tmp_path / "data"
     isolate_rheo_environment(monkeypatch, root)
     register_harness_keys()
-    register(
-        KeySpec(
-            key=MEMBER_KEY,
-            type=ValueType.STR,
-            scope=Scope.MEMBER,
-            floor=None,
-            explicit_per_workspace=False,
-            default="member-default",
-        ),
-        origin=TEST_HARNESS_ORIGIN,
-    )
     return root
 
 
@@ -259,21 +245,23 @@ def test_member_rows_apply_only_to_member_scope_keys(
 ) -> None:
     caplog.set_level(logging.WARNING, logger="rheo_core.settings")
     rows = Rows(
-        workspace={MEMBER_KEY: "workspace-row"},
-        member={MEMBER_KEY: "member-row", HARNESS_EXPLICIT: "member-row"},
+        workspace={HARNESS_MEMBER: "workspace-row"},
+        member={HARNESS_MEMBER: "member-row", HARNESS_EXPLICIT: "member-row"},
     )
     resolved = resolve(workspace_id=WORKSPACE, account_id=ACCOUNT, source=rows)
-    assert resolved[MEMBER_KEY] == "member-row"
+    assert resolved[HARNESS_MEMBER] == "member-row"
     assert resolved[HARNESS_EXPLICIT] == "harness-package-default"
     ignored = {
         (r.setting_key, r.state, r.override_scope) for r in ignored_records(caplog)
     }  # type: ignore[attr-defined]
     assert ignored == {
-        (MEMBER_KEY, "setting_scope", "workspace"),
+        (HARNESS_MEMBER, "setting_scope", "workspace"),
         (HARNESS_EXPLICIT, "setting_scope", "member"),
     }
     # Without an account there are no member rows at all.
-    assert resolve(workspace_id=WORKSPACE, source=rows)[MEMBER_KEY] == "member-default"
+    assert (
+        resolve(workspace_id=WORKSPACE, source=rows)[HARNESS_MEMBER] == "member-default"
+    )
 
 
 def test_deployment_scope_row_is_ignored_and_logged(

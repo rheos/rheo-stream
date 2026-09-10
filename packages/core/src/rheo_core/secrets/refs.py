@@ -43,6 +43,18 @@ _FILE_SEGMENT = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
+def is_slug_path(text: object) -> bool:
+    """True for a ``file`` id: ``/``-separated lowercase slug segments, nothing else.
+
+    No empty segment (so no leading ``/`` and no ``//``), no ``.`` or ``..``, no
+    uppercase or underscore. Shared by ``SecretRef`` and ``FileBackend.read``, so a
+    backend called directly cannot be handed a path.
+    """
+    if not isinstance(text, str) or not text:
+        return False
+    return all(_FILE_SEGMENT.fullmatch(segment) for segment in text.split("/"))
+
+
 def _malformed(reason: str) -> SecretRefusal:
     return SecretRefusal(
         SECRET_REF_MALFORMED,
@@ -59,8 +71,7 @@ class SecretRef:
         if not isinstance(self.backend, SecretBackend):
             raise _malformed("unknown backend")
         if self.backend is SecretBackend.FILE:
-            segments = self.id.split("/")
-            if not segments or not all(_FILE_SEGMENT.fullmatch(s) for s in segments):
+            if not is_slug_path(self.id):
                 raise _malformed("file id is not a slug path")
         elif not _ENV_NAME.fullmatch(self.id):
             raise _malformed("env id is not an environment-variable name")

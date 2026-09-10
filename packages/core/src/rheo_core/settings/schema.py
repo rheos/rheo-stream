@@ -43,8 +43,8 @@ class Scope(StrEnum):
 class Floor(StrEnum):
     """The comparator that combines a deployment value with an override.
 
-    ``AND`` is spelt with the trailing underscore-free member name ``AND`` because
-    ``and`` is a keyword; its value is the ratified ``"and"``.
+    The member is named ``AND`` because ``and`` is a keyword; its value is the
+    ratified ``"and"``.
     """
 
     MIN = "min"

@@ -121,17 +121,11 @@ def deployment_layer(
 
 
 def current_profile(*, environ: Mapping[str, str] | None = None) -> str:
-    """The deployment-resolved ``profile`` alone, for the harness registration gate.
+    """The deployment-resolved ``profile``, for the harness registration gate.
 
-    ``RHEO_PROFILE``, then ``RHEO__profile`` / ``RHEO__PROFILE``, then the TOML, then
-    the package default. Reads only; creates nothing.
+    Deliberately the same deployment layer startup reads, so a stray ``RHEO__*``
+    variable or a malformed ``deployment.toml`` fails a harness registration exactly
+    as it would fail startup. Reads only; creates nothing.
     """
-    env = os.environ if environ is None else environ
-    spec = REGISTRY.get(PROFILE_KEY)
-    if PROFILE_VARIABLE in env:
-        return str(decode_text(spec, env[PROFILE_VARIABLE], source=PROFILE_VARIABLE))
-    for name in env_variable_names(PROFILE_KEY):
-        if name in env:
-            return str(decode_text(spec, env[name], source=name))
-    from_toml = load_deployment_toml(deployment_toml_path(_data_root_for(env)))
-    return str(from_toml.get(PROFILE_KEY, spec.default))
+    layer = deployment_layer(environ=environ)
+    return str(layer.get(PROFILE_KEY, REGISTRY.get(PROFILE_KEY).default))

@@ -6,7 +6,6 @@ calls ``scope_for("storage", "secret://file/cluster/", "secret://env/RHEO_CLUSTE
 where it is constructed. This module ships ``scope_for`` and nothing else.
 """
 
-import os
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -94,10 +93,10 @@ def check_env_references(
     Returns the variable names it verified, sorted. Raises ``secret_missing`` naming
     the first missing variable and the setting that names it.
     """
-    env = os.environ if environ is None else environ
+    env = EnvBackend(environ)
     checked: list[str] = []
     for key, ref in sorted(env_references(settings).items()):
-        if ref.id not in env:
+        if not env.has(ref.id):
             raise SecretRefusal(
                 SECRET_MISSING,
                 f"environment variable {ref.id}, named by setting {key}, is not set",

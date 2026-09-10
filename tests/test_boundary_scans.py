@@ -11,6 +11,10 @@ walk so a lazily imported name cannot hide.
 2. No file under the top-level ``modules/`` distribution directory imports
    ``rheo_core.secrets``: domain modules are constructed without a scope and must have
    no way to reach the store.
+3. The scope privates ``_SENTINEL`` and ``_new_scope`` are imported or named (as a
+   name, an attribute, or a string constant, which is the ``getattr`` route) in no
+   file outside ``rheo_core/secrets/``, walking ``modules/`` too. This file is the one
+   exemption: it must spell the names it hunts for.
 
 ``SKIP_DIRS`` is the shipped ``scripts/check_web_platform.py`` set plus ``__pycache__``
 and ``.venv``; C4's ``tests/test_boundary.py`` declares its own copy rather than
@@ -125,3 +129,52 @@ def test_no_module_distribution_imports_the_secret_store() -> None:
     assert not violations, (
         f"a module distribution imports rheo_core.secrets: {violations}"
     )
+
+
+# The sentinel and the private constructor: named nowhere outside the package.
+_SCOPE_PRIVATES = frozenset({"_SENTINEL", "_new_scope"})
+
+
+def _scope_private_mentions(tree: ast.AST) -> list[str]:
+    """Every name, attribute, import alias or string constant naming a scope private."""
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in _SCOPE_PRIVATES:
+            found.append(f"name {node.id} at line {node.lineno}")
+        elif isinstance(node, ast.Attribute) and node.attr in _SCOPE_PRIVATES:
+            found.append(f"attribute .{node.attr} at line {node.lineno}")
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name in _SCOPE_PRIVATES:
+                    found.append(f"import {alias.name} at line {node.lineno}")
+        elif (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value in _SCOPE_PRIVATES
+        ):
+            # getattr(module, "_SENTINEL") names it as a string.
+            found.append(f"string {node.value!r} at line {node.lineno}")
+    return found
+
+
+def test_scope_privates_are_named_only_inside_the_secrets_package() -> None:
+    this_file = Path(__file__).resolve()
+    violations: dict[str, list[str]] = {}
+    for top in (*_SCAN_DIRS, "modules"):
+        for path in _python_files(_REPO_ROOT / top):
+            # This scan must spell the names it hunts for; no other file may.
+            if path.is_relative_to(_SECRETS_PACKAGE) or path.resolve() == this_file:
+                continue
+            mentions = _scope_private_mentions(_parse(path))
+            if mentions:
+                violations[str(path.relative_to(_REPO_ROOT))] = mentions
+    assert not violations, (
+        f"scope privates named outside rheo_core/secrets/: {violations}"
+    )
+    # Not vacuous: the store reaches the private constructor from inside the package.
+    inside = {
+        path.name
+        for path in _python_files(_SECRETS_PACKAGE)
+        if _scope_private_mentions(_parse(path))
+    }
+    assert inside == {"scope.py", "store.py"}, inside

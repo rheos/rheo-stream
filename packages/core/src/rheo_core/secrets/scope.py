@@ -1,10 +1,22 @@
-"""``SecretScope``: the unforgeable token that says what a component may resolve.
+"""``SecretScope``: the token that says what a component may resolve.
 
-The only constructor is ``SecretStore.scope_for(component, *prefixes)``, which calls
-the module-private :func:`_new_scope` here; the class's ``__init__`` demands a sentinel
-that never leaves this module, so ``SecretScope(...)`` from anywhere else raises, and
-so does ``dataclasses.replace``. An AST test asserts the call ``SecretScope(`` appears
-in no file outside ``rheo_core/secrets/``.
+Constructed by ``SecretStore.scope_for(component, *prefixes)``, which calls the
+package-private :func:`_new_scope` here. The class's ``__init__`` demands a sentinel
+this module does not export, so ``SecretScope(...)`` from anywhere else raises, and so
+do ``dataclasses.replace``, subclassing, pickling and copying (a scope never needs to
+travel: scope constants belong to their components). Two AST tests assert that the
+call ``SecretScope(`` and the names ``_SENTINEL`` / ``_new_scope`` appear in no file
+outside ``rheo_core/secrets/``.
+
+**What that guarantees, and what it does not.** The sentinel and the scans stop
+*accidental* construction: every shape an honest caller would write. They are not a
+privacy boundary, because Python has none. Code that has already imported this
+package can reach the sentinel through the module object, build an instance with
+``object.__new__`` plus ``object.__setattr__``, or widen a legitimate scope in place
+the same way; and the same code could read ``os.environ`` without forging anything.
+The real boundary is the import scan: no module distribution imports
+``rheo_core.secrets`` at all, so domain code has no path to a store. That residual is
+recorded here rather than chased with runtime state inside a security primitive.
 
 A scope names the **full reference prefixes** it may resolve, which accommodates both
 backends' id shapes (``secret://file/cluster/`` and ``secret://env/RHEO_CLUSTER_DSN``).
@@ -15,14 +27,16 @@ a prefix without one covers exactly that reference or a path beneath it, so
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, NoReturn, SupportsIndex, final
 
 from rheo_core.secrets.refs import SCHEME, SecretBackend, SecretRef
 
 _SENTINEL: Final = object()
 _PREFIX_ROOTS: Final = tuple(f"{SCHEME}{backend.value}/" for backend in SecretBackend)
+_NO_TRAVEL: Final = "a SecretScope does not travel: it is neither pickled nor copied"
 
 
+@final
 @dataclass(frozen=True, slots=True, init=False)
 class SecretScope:
     component: str
@@ -37,6 +51,15 @@ class SecretScope:
             )
         object.__setattr__(self, "component", component)
         object.__setattr__(self, "prefixes", prefixes)
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        raise TypeError("SecretScope cannot be subclassed")
+
+    def __reduce__(self) -> NoReturn:
+        raise TypeError(_NO_TRAVEL)
+
+    def __reduce_ex__(self, protocol: SupportsIndex, /) -> NoReturn:
+        raise TypeError(_NO_TRAVEL)
 
     def permits(self, ref: SecretRef) -> bool:
         text = str(ref)

@@ -80,7 +80,6 @@ _PURPOSE_SUBDIRS: Final[Mapping[Purpose, str]] = {
     Purpose.EXPORTS: "exports",
     Purpose.SCRATCH: "runtime",
 }
-WORKSPACE_SUBDIRS: Final = ("uploads", "exports", "runs", "runtime")
 ROOT_SUBDIRS: Final = ("config", "secrets", "workspaces", "logs")
 
 

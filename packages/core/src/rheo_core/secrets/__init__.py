@@ -1,11 +1,16 @@
 """The secret store and ``secret://`` reference resolution (A4, FR-13, guardrail 14).
 
 A file-backed store with an environment-variable backend, both behind
-``SecretStore.resolve(ref, scope) -> SecretValue``. ``SecretScope`` is an unforgeable
-token constructed only by ``SecretStore.scope_for(component, *prefixes)``; a
-component built without one has no way to resolve anything. ``SecretValue`` is
-redacted in ``repr``/``str``, compares in constant time, refuses every serialisation
-route, and exposes its bytes only through ``expose()``.
+``SecretStore.resolve(ref, scope) -> SecretValue``. A ``SecretScope`` is constructed
+by ``SecretStore.scope_for(component, *prefixes)``; a component built without one has
+no way to resolve anything. The sentinel in ``scope.py`` and the AST scans stop
+*accidental* construction, and that is their ceiling: Python has no private state, so
+code that has already imported this package could forge or widen a scope, just as it
+could read ``os.environ`` directly. The real boundary is the module import scan (no
+``modules/**`` file imports ``rheo_core.secrets``), which is what keeps domain code
+away from the store. ``SecretValue`` is redacted in ``repr``/``str``, compares in
+constant time, refuses every serialisation route, and exposes its bytes only through
+``expose()``.
 
 **References never travel.** A ``SecretRef`` is the only form of a secret that appears
 in configuration, the control plane, workspace tables or an export, and even the

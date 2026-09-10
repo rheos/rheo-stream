@@ -2,9 +2,10 @@
 
 Seams: ``SecretStore.resolve()`` scope enforcement (a foreign scope is
 ``secret_scope_denied``, no scope is a type error, missing is ``secret_missing`` naming
-the variable or path and never a value), ``SecretRef`` parsing, and ``SecretValue``'s
-redaction and non-serialisability through every route (``str``, ``repr``, ``format``,
-``json.dumps``, the encoder hook, pydantic, pickle, copy).
+the variable or path and never a value), ``SecretRef`` parsing, ``FileBackend.read``'s
+own id validation, and ``SecretValue``'s redaction and non-serialisability through
+every route (``str``, ``repr``, ``format``, ``json.dumps``, the encoder hook, pydantic,
+pickle, copy).
 
 Every secret here is a fixed literal, so no assertion samples randomness.
 """
@@ -221,7 +222,7 @@ def test_secret_value_is_unhashable_and_final() -> None:
         type("Leaky", (SecretValue,), {"__repr__": lambda self: "x"})
 
 
-# --- SecretScope: unforgeable -------------------------------------------------------
+# --- SecretScope: accidental construction refused ------------------------------------
 
 
 def test_secret_scope_cannot_be_constructed_outside_the_store() -> None:
@@ -239,6 +240,19 @@ def test_secret_scope_cannot_be_widened_by_replace(storage_scope: SecretScope) -
         dataclasses.replace(storage_scope, prefixes=("secret://file/",))
     with pytest.raises(dataclasses.FrozenInstanceError):
         storage_scope.prefixes = ("secret://file/",)  # type: ignore[misc]
+
+
+def test_secret_scope_cannot_be_subclassed_pickled_or_copied(
+    storage_scope: SecretScope,
+) -> None:
+    with pytest.raises(TypeError, match="subclass"):
+        type("Wider", (SecretScope,), {})
+    with pytest.raises(TypeError, match="travel"):
+        pickle.dumps(storage_scope)
+    with pytest.raises(TypeError, match="travel"):
+        copy.copy(storage_scope)
+    with pytest.raises(TypeError, match="travel"):
+        copy.deepcopy({"scope": storage_scope})
 
 
 def test_scope_for_validates_its_prefixes() -> None:
@@ -388,12 +402,30 @@ def test_a_directory_at_the_secret_path_is_missing_not_readable(
     assert excinfo.value.state == "secret_missing"
 
 
-def test_file_backend_creates_its_directory_owner_only(data_root: Path) -> None:
-    backend = FileBackend(data_root / "secrets")
-    created = backend.ensure()
-    assert created.is_dir()
-    assert created.stat().st_mode & 0o777 == 0o700
-    assert backend.ensure() == created  # idempotent
+@pytest.mark.parametrize(
+    "ref_id",
+    [
+        "../../outside/key",
+        "/etc/passwd",
+        "cluster/../../outside/key",
+        "",
+        "Cluster/Key",
+        "cluster//key",
+    ],
+)
+def test_file_backend_refuses_an_id_that_could_leave_its_root(
+    tmp_path: Path, ref_id: str
+) -> None:
+    """The backend validates ids itself; a 0600 file outside the root stays unread."""
+    outside = tmp_path / "outside" / "key"
+    outside.parent.mkdir(parents=True)
+    outside.write_bytes(SECRET)
+    outside.chmod(0o600)
+    backend = FileBackend(tmp_path / "data" / "secrets")
+    with pytest.raises(SecretRefusal) as excinfo:
+        backend.read(ref_id)
+    assert excinfo.value.state == "secret_ref_malformed"
+    assert SECRET_TEXT not in str(excinfo.value)
 
 
 # --- the startup env check -----------------------------------------------------------
