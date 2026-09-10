@@ -65,6 +65,9 @@ PRIVATE_PATHS = (
     ".ruff_cache/CACHEDIR.TAG",
     ".mypy_cache/CACHEDIR.TAG",
     ".pytest_cache/CACHEDIR.TAG",
+    # 0b1: checkout-local operator config and secret files under .rheo-local/.
+    ".rheo-local/config/deployment.toml",
+    ".rheo-local/secrets/cluster/primary-dsn",
 )
 
 PUBLIC_PATHS = (
@@ -100,6 +103,10 @@ PUBLIC_PATHS = (
     "apps/web/package.json",
     "deploy/compose.yaml",
     "Dockerfile",
+    # 0b1: the packaged settings defaults and the core Alembic chain's first
+    # revision are public source, not runtime data.
+    "packages/core/src/rheo_core/config/defaults.toml",
+    "packages/core/src/rheo_core/migrations/core/versions/0001_core_schema.py",
 )
 
 

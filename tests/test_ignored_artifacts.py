@@ -34,6 +34,10 @@ def _artifact_relpaths(token: str) -> "tuple[str, ...]":
         f".rheo-local/exports/{token}/workspace.csv",
         f".rheo-local/backups/{token}.sql",
         f".rheo-local/memory/{token}/index.bin",
+        # 0b1: the operator config file and the file secret backend's cluster
+        # secret, both checkout-local.
+        f".rheo-local/config/{token}/deployment.toml",
+        f".rheo-local/secrets/{token}/cluster/primary-dsn",
     )
 
 
@@ -70,10 +74,17 @@ def rheo_local_artifacts() -> "list[str]":
         else:
             # .rheo-local already held (possibly real) data: remove only the unique
             # per-run token dirs this test created, never a shared family path.
+            # Walk each relative path's own directories (not just the immediate
+            # parent) for the first one named after the token, so a nested shape
+            # like ``secrets/<token>/cluster/primary-dsn`` is cleaned up from the
+            # token directory down, not left as an orphaned ``cluster/`` dir.
             for relative in relpaths:
-                token_dir = (_REPO_ROOT / relative).parent
-                if token in token_dir.name:
-                    shutil.rmtree(token_dir, ignore_errors=True)
+                ancestor = (_REPO_ROOT / relative).parent
+                while ancestor != _REPO_ROOT:
+                    if token in ancestor.name:
+                        shutil.rmtree(ancestor, ignore_errors=True)
+                        break
+                    ancestor = ancestor.parent
 
 
 def test_checkout_local_artifacts_are_ignored(

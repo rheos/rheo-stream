@@ -7,6 +7,7 @@ dependencies = [
     "sqlalchemy>=2.0,<3",
     "psycopg[binary]>=3.2,<4",
     "alembic>=1.13,<2",
+    "pydantic>=2,<3",
 ]
 
 [tool.uv.sources]

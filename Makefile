@@ -1,9 +1,18 @@
-# Canonical command surface for run 0a. Each target is a thin alias over the
-# underlying uv/pnpm/docker commands (plan.md, "Canonical commands"); the tool
+# Canonical command surface, started in run 0a. Each target is a thin alias over
+# the underlying uv/pnpm/docker commands (plan.md, "Canonical commands"); the tool
 # commands are the stable contract E0c freezes, the Makefile is the convenience.
-# Only `up`/`down`/`demo` need Docker running; `test`/`check` stay Docker-free.
+# `test` needs a reachable Postgres (`make up`, or `RHEO_TEST_CLUSTER_DSN`
+# pointing at one); `check` stays Docker-free.
+#
+# This deliberately reverses 0a's original rule ("only up/down/demo need Docker
+# running; test/check stay Docker-free"), from run 0b1 on: `core` now makes a
+# real database call at startup, and tests/conftest.py bridges the suite into the
+# production settings->secret-scope path against a real cluster rather than an
+# injected DSN. When the cluster is unreachable, `uv run pytest` fails fast
+# (tests/conftest.py, pytest.exit) with a message naming the remedy — it never
+# skips, because a skipped `postgres` marker would pass this gate vacuously.
 
-.PHONY: install test lint typecheck build up down demo check
+.PHONY: install test lint typecheck build up down demo check migrate
 
 install:
 	uv sync --frozen
@@ -32,6 +41,9 @@ up:
 down:
 	docker compose -f deploy/compose.yaml down
 
+migrate:
+	uv run rheo migrate
+
 # End-to-end proof that `core` (in compose) and the web shell (under `next start`,
 # outside compose — 0a does not containerize web, spec.md W1) compose without a
 # shared container. Starts postgres + core, polls (not a fixed sleep) for core to
@@ -55,6 +67,27 @@ demo:
 		if docker compose -f deploy/compose.yaml exec -T postgres pg_isready -U rheo -d rheo >/dev/null 2>&1; then break; fi; \
 		sleep 1; \
 	done; \
+	demo_dsn="postgresql://rheo:rheo_dev_only@localhost:$${RHEO_PG_PORT:-5432}/postgres"; \
+	demo_data_root="$$(pwd)/.rheo-local"; \
+	echo "Running rheo migrate..."; \
+	if ! RHEO_CLUSTER_DSN="$$demo_dsn" RHEO_PROFILE=development RHEO_DATA_ROOT="$$demo_data_root" \
+		uv run rheo migrate; then \
+		echo "FAIL  rheo migrate"; exit 1; \
+	fi; \
+	echo "PASS  rheo migrate"; \
+	echo "Running rheo account create..."; \
+	account_id="$$(RHEO_CLUSTER_DSN="$$demo_dsn" RHEO_PROFILE=development RHEO_DATA_ROOT="$$demo_data_root" \
+		uv run rheo account create --provider github --subject demo-owner --display-name "Demo owner")"; \
+	if [ -z "$$account_id" ]; then \
+		echo "FAIL  rheo account create  produced no account id on stdout"; exit 1; \
+	fi; \
+	echo "PASS  rheo account create  $$account_id"; \
+	echo "Running rheo workspace create --owner $$account_id..."; \
+	if ! RHEO_CLUSTER_DSN="$$demo_dsn" RHEO_PROFILE=development RHEO_DATA_ROOT="$$demo_data_root" \
+		uv run rheo workspace create --owner "$$account_id" >/dev/null; then \
+		echo "FAIL  rheo workspace create --owner $$account_id"; exit 1; \
+	fi; \
+	echo "PASS  rheo workspace create --owner $$account_id"; \
 	echo "Waiting for core /healthz..."; \
 	core_up=0; \
 	for _ in $$(seq 1 60); do \
