@@ -1,0 +1,41 @@
+# Virtual workspace root. Nothing installs from the root itself; it only ties the
+# member distributions together and holds the shared Python tool configuration.
+# `members` is scoped to what C1 creates on purpose: `uv lock`/`uv sync` errors on a
+# workspace member glob that resolves to a directory with no `pyproject.toml`, and the
+# app/module/connector/runtime directories carry none until C2. C2 extends this list.
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[tool.ruff]
+target-version = "py312"
+# scripts/check_repository.py predates this ruff config and is owned by C4 (the
+# publication-check extension). It is excluded from lint and format so the whole-tree
+# `ruff check .` / `ruff format --check .` stay green without C1 editing a C4-owned
+# file; C4 brings it under ruff when it extends it.
+extend-exclude = ["scripts/check_repository.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+files = ["packages"]
+# src layout: resolve each distribution by the name under its own `src/` directory
+# rather than as a dotted path from the repo root.
+mypy_path = ["packages/contracts/src", "packages/core/src"]
+explicit_package_bases = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
