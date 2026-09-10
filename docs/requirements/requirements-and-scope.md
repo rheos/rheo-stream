@@ -1,4 +1,4 @@
-# Rheo Stream — requirements and scope
+# rheoStream — requirements and scope
 
 **Status:** Accepted. Ratified by the maintainer's review and merge of the pull request that
 carried this document (PR #5, 2026-09-09). The eleven settled decisions D1 to D11 record
@@ -31,7 +31,7 @@ own decision ledger.
 
 Release one succeeds when one person can receive a real inbound inquiry from a funnel they
 already operate, work it as an opportunity through a configured pipeline, and reach a
-terminal outcome, using Rheo Stream alone and without touching either predecessor
+terminal outcome, using rheoStream alone and without touching either predecessor
 application for that path. Everything else in this document exists to make that sentence
 true without foreclosing the framework the idea document describes.
 
@@ -73,7 +73,7 @@ against them; neither reopens them.
 ### Historical migration notes
 
 Stated at the level of detail the idea document already uses, to size the port. These are
-facts about superseded private systems, not descriptions of Rheo Stream.
+facts about superseded private systems, not descriptions of rheoStream.
 
 - The opportunity-discovery predecessor (MOL in the idea document's legacy map) is FastAPI
   plus React/Vite, running on MySQL in production. Its migration is a MySQL-to-Postgres move
@@ -193,11 +193,11 @@ of it is exercised by a one-person start. So the structure ships and the feature
 **Decision.** The capability that proves custom-funnel intake is a single path, end to end:
 
 > An inbound-inquiry form on a site the maintainer already operates posts to an authenticated
-> intake endpoint. Rheo Stream durably accepts the delivery, records a receipt, normalizes it
+> intake endpoint. rheoStream durably accepts the delivery, records a receipt, normalizes it
 > into an observation with per-field provenance, resolves or creates a party through the
 > relationships module, applies an explicit routing rule that creates an opportunity in an
 > inbound-services pipeline, and the maintainer works that opportunity through its stages to a
-> terminal disposition, both in the web interface and through Rheo.
+> terminal disposition, both in the web interface and through rheo.
 
 That path is the release-one definition of done. It contains no job board, no candidate
 profile, no application tooling, and no field named after any source product.
@@ -210,7 +210,7 @@ mandatory sequence in which every lead becomes a project, and building the desti
 the source would invert the dependency.
 
 **How much memory support belongs in it: the whole module, off the critical path.** The memory
-module ships in phase two, before the opportunity core, per D11. In the first release slice Rheo
+module ships in phase two, before the opportunity core, per D11. In the first release slice rheo
 can recall and remember with workspace and record permissions enforced, and memories can link
 back to Leads records. The intake-to-outcome path must complete correctly in a workspace where
 the memory module was never installed and never enabled. If it cannot, the module boundary is
@@ -284,7 +284,7 @@ specialist module), evidence relationships (a specialist module), notes, tags, s
 field a profession would recognize as its own. Referencing a party grants no access to records
 about that party. The shared contact record is not a container for specialist data.
 
-**What an external CRM may own:** any field except the Rheo Stream party identifier itself.
+**What an external CRM may own:** any field except the rheoStream party identifier itself.
 A CRM connection declares, per field, which system is authoritative and which direction of
 update is permitted. A write to a field the CRM owns is rejected, not merged. Replacing a CRM
 provider requires an explicit identity migration; two competing authorities for one field is a
@@ -432,7 +432,7 @@ acceptance criteria.
 
 ### Agent runtime and the MCP boundary
 
-- **FR 19.** Rheo's model execution is behind a runtime adapter contract. Domain services accept
+- **FR 19.** rheo's model execution is behind a runtime adapter contract. Domain services accept
   structured requests and return structured results, and no domain module or channel references
   a specific runtime, model, or vendor.
 - **FR 20.** `ClaudeCliRuntime` is implemented in release one. The runtime contract's capability
@@ -546,7 +546,7 @@ These three are appended after FR 50 so that the numbering above stays stable.
   Each module declares its own export format in its manifest, so a module's records travel with
   the workspace rather than needing core knowledge of that module. A restored pending approved
   action requires a fresh approval before it can execute.
-- **FR 53.** Migrating a predecessor data store into a Rheo Stream module is verified before
+- **FR 53.** Migrating a predecessor data store into a rheoStream module is verified before
   switchover: every source record has a destination record, and a sampled set of retrieval
   queries returns the same records under the new implementation as under the old one, within a
   documented tolerance. The verification result is recorded where the migrated data lives, in

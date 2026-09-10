@@ -13,7 +13,7 @@ export default async function Page() {
 
   return (
     <main>
-      <h1>Rheo Stream</h1>
+      <h1>rheoStream</h1>
       {health.status === "ok" ? (
         <p>core: ok (contract v{health.contractVersion})</p>
       ) : (

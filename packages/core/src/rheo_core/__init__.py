@@ -1,4 +1,4 @@
-"""The Rheo Stream framework core.
+"""The rheoStream framework core.
 
 Boundary adapters, the service registry, storage and unit of work, migrations,
 settings, secret store, identity/sessions/tokens, the outbox/worker runtime, operations

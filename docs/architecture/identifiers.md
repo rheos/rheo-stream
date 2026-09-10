@@ -6,7 +6,7 @@ globally safe) and the record-reference responsibility the idea document assigns
 
 ## Why this needs a rule at all
 
-Rheo Stream keeps one database per workspace ([storage](storage-and-workspaces.md)), exports a
+rheoStream keeps one database per workspace ([storage](storage-and-workspaces.md)), exports a
 workspace into a portable artifact and restores it into another deployment (FR 52), and has a
 declared goal of a later local-first edition that syncs (D2). Identifiers are therefore minted in
 many databases with no coordinator and later meet. A sequential integer would collide the first

@@ -1,6 +1,6 @@
 # Contributing
 
-Rheo Stream is at the idea and architecture stage. Start with the
+rheoStream is at the idea and architecture stage. Start with the
 [idea document](docs/ideas/rheo-stream-idea.md) and its open decisions. Discuss scope
 in an issue before adding implementations or introducing dependencies.
 
