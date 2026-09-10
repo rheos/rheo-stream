@@ -12,8 +12,11 @@ services:
       POSTGRES_USER: rheo
       POSTGRES_PASSWORD: rheo_dev_only
       POSTGRES_DB: rheo
+    # Host port is parameterised so a developer whose 5432 is already bound by an
+    # unrelated project can run this stack without touching that container. The
+    # default is the literal previous value, so a fresh clone is unchanged.
     ports:
-      - "5432:5432"
+      - "${RHEO_PG_PORT:-5432}:5432"
     # Data on a named Docker volume, never a bind mount into the repo, so
     # `make up`/`make demo` write nothing into the tracked tree (criterion 2).
     volumes:
