@@ -20,11 +20,6 @@ dev = [
 
 [tool.ruff]
 target-version = "py312"
-# scripts/check_repository.py predates this ruff config and is owned by C4 (the
-# publication-check extension). It is excluded from lint and format so the whole-tree
-# `ruff check .` / `ruff format --check .` stay green without C1 editing a C4-owned
-# file; C4 brings it under ruff when it extends it.
-extend-exclude = ["scripts/check_repository.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

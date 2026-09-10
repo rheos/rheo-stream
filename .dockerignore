@@ -17,6 +17,9 @@
 !packs/**
 !deploy/
 !deploy/**
+!pyproject.toml
+!uv.lock
+!.python-version
 
 # Re-exclude private artifacts and local dependencies within allowed source trees.
 **/AGENTS.md
