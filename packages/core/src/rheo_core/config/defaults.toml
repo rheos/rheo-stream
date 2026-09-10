@@ -1,0 +1,23 @@
+# Package defaults for rheo-core's declared settings keys (A5). Values only: the
+# declaration of each key (type, scope, floor, explicit_per_workspace) lives in
+# rheo_core/settings/schema.py, and rheo_core/settings/defaults.py asserts at import
+# time that this file's key set and the registry's core key set are identical and that
+# the values agree.
+#
+# That check holds PER MERGE SHA: every later chunk that adds a key adds it to both
+# this file and schema.py, and no run declares a key that only a later run reads. C2
+# (run 0b1) declares exactly the eight keys below. Harness keys (tests/harness/) are
+# registry-only by design and never appear here.
+
+profile = "development"
+
+[storage]
+cluster_dsn_ref = "secret://env/RHEO_CLUSTER_DSN"
+control_database = "rheo_control"
+template_database = "template1"
+pool_cache_size = 32
+pool_max_connections = 5
+
+[identity.token_max_days]
+cli = 90
+mcp = 30
