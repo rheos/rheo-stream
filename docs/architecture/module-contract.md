@@ -103,6 +103,7 @@ The release-one operations and their roles are listed in the document that owns 
 | `core.approval.approve`, `.refuse` | mutate | owner, member. Non-token-issuable, so reachable only from a web session in release one: the only contexts that carry one of those roles and hold the operation. |
 | `core.standing_grant.create`, `.revoke` | mutate | owner. Non-token-issuable. |
 | `core.audit.list`, `core.work.failures` | read | owner, operator |
+| `core.work.failure_summary` | read | owner, operator. The counts the shell's banner reads ([retry](intake-and-events.md#retry)); a summary rather than a listing so the layout costs one bounded read. |
 | `core.work.retry`, `.skip`, `.replay`, `core.operation.resolve` | mutate | owner, operator |
 | `core.workspace.export`, `.digest` | mutate, long-running; read | owner, operator |
 | `core.workspace.restore` | mutate, long-running | operator, or an account restoring into a workspace the control plane does not yet know |

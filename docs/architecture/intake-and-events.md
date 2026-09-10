@@ -30,7 +30,7 @@ All in the `leads` schema. Every table has `id uuid` (UUIDv7) unless noted.
 | `funnel` | `name text`, `description text`, `created_at`, `archived_at null` | Acquisition context: a site, an event, a referral programme. |
 | `campaign` | `funnel_id`, `name text`, `created_at`, `archived_at null` | Optional refinement of a funnel. |
 | `intake_connection` | `name`, `transport text`, `source_namespace text unique`, `mapping_id`, `mapping_version integer`, `funnel_id null`, `campaign_id null`, `priority integer`, `subject_authenticated boolean`, `email_verified boolean`, `signing_secret_ref text null`, `signing_key_generation integer`, `previous_secret_ref text null`, `previous_valid_until timestamptz null`, `state text`, `created_at`, `revoked_at null` | `transport` in `webhook`, `import`, `manual`. `state` in `active`, `needs_credential`, `revoked`. `source_namespace` is a URI (`urn:rheo:connection:<uuid>`) used as the CloudEvents `source`. `funnel_id` is null only on the `manual` connection, where each capture names its funnel (check constraint). `subject_authenticated` and `email_verified` are the operator's declaration of what this source proves, which R4 needs. `signing_key_generation` starts at 1 and increments on every rotation; it is the only rotation mechanism (see [transports](#transports)). |
-| `connection_health` | `connection_id pk`, `last_accepted_at`, `last_processed_at`, `pending_count`, `unresolved_failures integer`, `last_error text null`, `last_error_at timestamptz null`, `last_unauthenticated_write_at timestamptz null`, `lag_seconds integer` | Maintained by the intake worker; read by `leads.connection.health` (FR 38). `last_error_at` is set by every path that records a failure. `last_unauthenticated_write_at` is written by the webhook receiver alone and is what bounds its pre-authentication write ([transports](#transports)); it is a separate column precisely so an authenticated path's write can never suppress the receiver's, which criterion 42 requires to be visible. |
+| `connection_health` | `connection_id pk`, `last_accepted_at`, `last_processed_at`, `pending_count`, `unresolved_failures integer`, `last_error text null`, `last_error_at timestamptz null`, `last_unauthenticated_write_at timestamptz null`, `lag_seconds integer` | Maintained by the intake worker; read by `leads.connection.health` (FR 38). `last_error_at` is set by every path that records a failure. `last_unauthenticated_write_at` is written by the webhook receiver alone and is what bounds its pre-authentication write ([transports](#transports)); it is a separate column precisely so an authenticated path's write can never suppress the receiver's, which criterion 42 requires to be visible. The operation's `failed_delivery_count` is **not** a column here: it is computed at read time from `core.work.failures` ([retry](#retry)), so there is no second counter that could disagree with the delivery table. |
 | `field_mapping` | `id`, `version integer`, `name`, `source_kind text`, `state text` | `source_kind` in `json`, `csv`. Primary key `(id, version)`. Versions are immutable once a receipt pins them. |
 | `field_mapping_identity` | `mapping_id`, `version`, `event_id_path`, `occurred_at_path`, `subject_id_path null`, `verified_email_path null` | Where identity lives in a payload. Paths are JSON Pointers for JSON, column names for CSV. |
 | `field_mapping_rule` | `mapping_id`, `version`, `target text`, `source_path text`, `transform text null`, `transform_arg text null`, `required boolean`, `clear_on_null boolean` | `target` is a core fact name or `ext.<namespace>.<field>`. `transform` from a closed set: `trim`, `lower`, `email_normalize`, `phone_normalize`, `datetime(format)`, `const(value)`. |
@@ -345,6 +345,36 @@ not left to each handler.
 `work.max_attempts` (default 8, about two and a half hours end to end). After the last attempt the delivery is `failed`
 with its error and appears in `core.work.failures` (criterion 12). An operator or owner may
 `retry` a failed delivery, which resets attempts.
+
+**A failed head is surfaced, not merely recorded.** Head-of-line blocking is deliberate — order is
+never broken silently — but every route out of it needs a person, and a design where the only
+route *in* is a screen nobody has opened is a queue that stops for two and a half hours and then
+stays stopped. So the failure is pushed to the two places a person already is:
+
+- **The shell.** `core.work.failure_summary` (read class, roles `owner`, `operator`) returns
+  `{ failed_count, blocked_count, oldest_failed_at }` for the session's active workspace, and the
+  application shell reads it in its layout and renders a persistent banner on every screen while
+  `failed_count` is above zero, linking to the work-failures view. It is the shell's own surface,
+  not a module contribution, so it is present in a workspace with no module enabled and it covers
+  every consumer rather than only Leads. One read per navigation, cached for
+  `work.failure_summary_cache_seconds` (default 30).
+- **The connection.** `leads.connection.health` (FR 38) additionally reports
+  `failed_delivery_count`, obtained by calling `core.work.failures` filtered to the receipts of
+  that connection at read time. It is computed, not stored: there is no new column, no new
+  callback from the worker into a module, and no duplicated counter that could disagree with the
+  delivery table. Intake failures therefore appear where an owner already looks for the health of
+  a funnel.
+
+Neither is a notification in the sense of leaving the deployment. Release one has no outbound
+channel — no email, no push — and inventing one here would be new machinery for a problem the
+banner solves for a tool its owner opens daily. Phase six's channel is the first surface that can
+reach a person who is *not* looking, and the escalation belongs there
+([later phases](later-phases.md#phase-6-channels-and-the-second-runtime)) rather than in a core
+component release one would carry unused.
+
+The same summary counts operations in state `unresolved`, which has the identical shape: a
+terminal record state that is an open item for a person, listed by `core.work.failures`, and
+cleared only by an explicit `core.operation.resolve` call.
 
 **Replay.** `core.work.replay(consumer_id, from_position)` re-creates `pending` deliveries for a
 consumer from the outbox. It is permitted only for consumers whose subscription declares
