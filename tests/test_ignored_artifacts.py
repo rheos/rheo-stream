@@ -56,22 +56,26 @@ def rheo_local_artifacts() -> "list[str]":
     relpaths = _artifact_relpaths(token)
     rheo_local = _REPO_ROOT / ".rheo-local"
     preexisting = rheo_local.exists()
-    created: list[Path] = []
+    # Enforce the module docstring's own rule before writing anything, in a pass
+    # over every path that writes nothing: a fixed literal path here would
+    # overwrite (then delete) real data at that path if it already existed.
+    # Validating inside the write loop below would let an earlier iteration's
+    # write stand uncleaned if a later path failed this check, since that write
+    # would happen before the try/finally starts. Nothing else in this suite or
+    # in check_repository.py checks this — it is otherwise pure discipline.
     for relative in relpaths:
-        # Enforce the module docstring's own rule before writing anything: a
-        # fixed literal path here would overwrite (then delete) real data at
-        # that path if it already existed. Nothing else in this suite or in
-        # check_repository.py checks this — it is otherwise pure discipline.
         assert token in relative, (
             f"fixture path {relative!r} does not carry the per-run token "
             f"{token!r}; a fixed literal path here risks silently destroying "
             "real .rheo-local/ data at that path"
         )
-        path = _REPO_ROOT / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("test artifact\n", encoding="utf-8")
-        created.append(path)
+    created: list[Path] = []
     try:
+        for relative in relpaths:
+            path = _REPO_ROOT / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("test artifact\n", encoding="utf-8")
+            created.append(path)
         yield list(relpaths)
     finally:
         for path in created:

@@ -2,11 +2,12 @@
 
 The local stack (`deploy/compose.yaml`): `make up` brings up two services, `postgres`
 (`pgvector/pgvector:pg16`) and `core` (the FastAPI app, built from the repository
-root `Dockerfile`). Only `core`'s port, `8000`, is published to the host; `postgres`'s
-host port is controlled by `RHEO_PG_PORT` (default `5432` — override it if that port
-is already bound by another project on your machine; the container always speaks
-`5432` on the compose network regardless of the remap). `make down` tears the stack
-down.
+root `Dockerfile`). Both are published to the host — `core` on `RHEO_CORE_PORT`
+(default `8000`) and `postgres` on `RHEO_PG_PORT` (default `5432`); override either
+if its default is already bound by another project on your machine. Neither
+container's own port changes: `core` always answers on `8000` and `postgres` on
+`5432` inside the compose network regardless of a host-side remap. `make down`
+tears the stack down.
 
 The **data-root volume**: `core` writes checkout-external runtime state (the file
 secret backend, deployment config, per-workspace upload/export/scratch directories —

@@ -49,59 +49,68 @@ migrate:
 # shared container. Starts postgres + core, polls (not a fixed sleep) for core to
 # answer and fails loudly if it never does, builds and starts web pointed at the
 # published core, then asserts both seams: core answers /healthz with a body only
-# our service returns (a bare 200 could come from an unrelated process already
-# holding the port) and the web page renders the *healthy* core seam ("contract
-# v...") rather than merely returning 200 (the shell 200s even when it can't reach
-# core). Host ports are all overridable (RHEO_PG_PORT/RHEO_CORE_PORT/
-# RHEO_WEB_PORT) for a machine where a default is already taken by something
-# else. Hermetic: the EXIT trap always tears down web, containers, the two named
-# volumes (`down -v`, unlike the plain `down` target, which deliberately leaves a
-# developer's data alone) and the `.rheo-local` directory this target's operator
-# sequence creates — so `make demo` is repeatable (a fixed --subject would
-# otherwise collide with the previous run's account on the second invocation) and
-# writes nothing durable outside the tracked tree.
+# our service returns (a bare 200, or a foreign body that happens to contain the
+# key, could come from an unrelated process already holding the port) and the web
+# page renders the *healthy* core seam ("contract v...") rather than merely
+# returning 200 (the shell 200s even when it can't reach core). Host ports are all
+# overridable (RHEO_PG_PORT/RHEO_CORE_PORT/RHEO_WEB_PORT) for a machine where a
+# default is already taken by something else; running this target requires those
+# ports free, so stop `make up`'s shared stack first if it is using the same ones.
+#
+# Isolated, not merely hermetic: runs in its OWN compose project
+# (`-p rheo-stream-demo`), so its containers, network, and the two named volumes
+# it creates are namespaced apart from the shared `rheo-stream` project `make
+# up`/`make down` manage — `down -v` at teardown can only ever remove volumes this
+# target itself created, never a developer's own data. The operator sequence's
+# data root is a fresh `mktemp -d` (never `.rheo-local`), removed at teardown
+# because this target created it; RHEO__storage__cluster_dsn_ref is pinned so a
+# stray, pre-existing deployment.toml elsewhere cannot redirect the operator
+# sequence at a different cluster. Every step's failure is checked directly (`||`
+# / `if !`) so `set -e` can never make a FAIL line unreachable.
 demo:
 	@set -e; \
+	demo_project="rheo-stream-demo"; \
 	core_port="$${RHEO_CORE_PORT:-8000}"; \
 	web_port="$${RHEO_WEB_PORT:-3000}"; \
+	demo_data_root="$$(mktemp -d)"; \
 	WEB_PID=""; \
 	cleanup() { \
 		if [ -n "$$WEB_PID" ]; then kill "$$WEB_PID" 2>/dev/null || true; fi; \
-		docker compose -f deploy/compose.yaml down -v || true; \
-		rm -rf .rheo-local; \
+		docker compose -p "$$demo_project" -f deploy/compose.yaml down -v || true; \
+		rm -rf "$$demo_data_root"; \
 	}; \
 	trap cleanup EXIT; \
-	$(MAKE) up; \
+	docker compose -p "$$demo_project" -f deploy/compose.yaml up -d; \
 	echo "Waiting for postgres to accept connections..."; \
 	for _ in $$(seq 1 60); do \
-		if docker compose -f deploy/compose.yaml exec -T postgres pg_isready -U rheo -d rheo >/dev/null 2>&1; then break; fi; \
+		if docker compose -p "$$demo_project" -f deploy/compose.yaml exec -T postgres pg_isready -U rheo -d rheo >/dev/null 2>&1; then break; fi; \
 		sleep 1; \
 	done; \
 	demo_dsn="postgresql://rheo:rheo_dev_only@localhost:$${RHEO_PG_PORT:-5432}/postgres"; \
-	demo_data_root="$$(pwd)/.rheo-local"; \
 	echo "Running rheo migrate..."; \
-	if ! RHEO_CLUSTER_DSN="$$demo_dsn" RHEO_PROFILE=development RHEO_DATA_ROOT="$$demo_data_root" \
-		uv run rheo migrate; then \
-		echo "FAIL  rheo migrate"; exit 1; \
-	fi; \
+	RHEO_CLUSTER_DSN="$$demo_dsn" RHEO__storage__cluster_dsn_ref="secret://env/RHEO_CLUSTER_DSN" \
+		RHEO_PROFILE=development RHEO_DATA_ROOT="$$demo_data_root" uv run rheo migrate \
+		|| { echo "FAIL  rheo migrate"; exit 1; }; \
 	echo "PASS  rheo migrate"; \
 	echo "Running rheo account create..."; \
-	account_id="$$(RHEO_CLUSTER_DSN="$$demo_dsn" RHEO_PROFILE=development RHEO_DATA_ROOT="$$demo_data_root" \
-		uv run rheo account create --provider github --subject demo-owner --display-name "Demo owner")"; \
+	account_id="$$(RHEO_CLUSTER_DSN="$$demo_dsn" RHEO__storage__cluster_dsn_ref="secret://env/RHEO_CLUSTER_DSN" \
+		RHEO_PROFILE=development RHEO_DATA_ROOT="$$demo_data_root" \
+		uv run rheo account create --provider github --subject demo-owner --display-name "Demo owner")" \
+		|| { echo "FAIL  rheo account create"; exit 1; }; \
 	if [ -z "$$account_id" ]; then \
 		echo "FAIL  rheo account create  produced no account id on stdout"; exit 1; \
 	fi; \
 	echo "PASS  rheo account create  $$account_id"; \
 	echo "Running rheo workspace create --owner $$account_id..."; \
-	if ! RHEO_CLUSTER_DSN="$$demo_dsn" RHEO_PROFILE=development RHEO_DATA_ROOT="$$demo_data_root" \
-		uv run rheo workspace create --owner "$$account_id" >/dev/null; then \
-		echo "FAIL  rheo workspace create --owner $$account_id"; exit 1; \
-	fi; \
+	RHEO_CLUSTER_DSN="$$demo_dsn" RHEO__storage__cluster_dsn_ref="secret://env/RHEO_CLUSTER_DSN" \
+		RHEO_PROFILE=development RHEO_DATA_ROOT="$$demo_data_root" \
+		uv run rheo workspace create --owner "$$account_id" >/dev/null \
+		|| { echo "FAIL  rheo workspace create --owner $$account_id"; exit 1; }; \
 	echo "PASS  rheo workspace create --owner $$account_id"; \
 	echo "Waiting for core /healthz..."; \
 	core_up=0; \
 	for _ in $$(seq 1 60); do \
-		if curl -sf "http://localhost:$$core_port/healthz" 2>/dev/null | grep -q '"contract_version"'; then core_up=1; break; fi; \
+		if curl -sf "http://localhost:$$core_port/healthz" 2>/dev/null | grep -q '"status":"ok","contract_version":'; then core_up=1; break; fi; \
 		sleep 1; \
 	done; \
 	if [ "$$core_up" != 1 ]; then \
@@ -112,7 +121,7 @@ demo:
 	RHEO_CORE_INTERNAL_URL="http://localhost:$$core_port" PORT="$$web_port" pnpm -C apps/web start & \
 	WEB_PID=$$!; \
 	rc=0; \
-	if curl -sf "http://localhost:$$core_port/healthz" 2>/dev/null | grep -q '"contract_version"'; then \
+	if curl -sf "http://localhost:$$core_port/healthz" 2>/dev/null | grep -q '"status":"ok","contract_version":'; then \
 		echo "PASS  core  http://localhost:$$core_port/healthz"; \
 	else \
 		echo "FAIL  core  http://localhost:$$core_port/healthz"; rc=1; \
