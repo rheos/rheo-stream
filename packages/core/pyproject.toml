@@ -2,7 +2,12 @@
 name = "rheo-core"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
-dependencies = ["rheo-contracts"]
+dependencies = [
+    "rheo-contracts",
+    "sqlalchemy>=2.0,<3",
+    "psycopg[binary]>=3.2,<4",
+    "alembic>=1.13,<2",
+]
 
 [tool.uv.sources]
 # rheo-contracts is a local workspace member, not published to any index.
