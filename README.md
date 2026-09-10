@@ -1,14 +1,14 @@
-# Rheo Stream
+# rheoStream
 
 An open, self-hostable framework for composing agent-assisted working environments.
 
 > Leads enter the stream. Current carries the work. Recallatron remembers.
 
-Rheo Stream is for independent professionals whose working life is spread across
+rheoStream is for independent professionals whose working life is spread across
 too many tools. You assemble a workspace from modules: **Leads** develops
 opportunities from whatever sources feed you work, **Current** carries active
 commitments and projects, and **Recallatron** keeps the context that would
-otherwise be lost between sessions. An agent named **Rheo** operates all of it
+otherwise be lost between sessions. An agent named **rheo** operates all of it
 in conversation, over Claude, Telegram, or voice. Conversation is the interface,
 not the database: the modules stay explicit systems of record that you can
 inspect, export, and own.
@@ -42,7 +42,7 @@ does and in what order.
 The project grows out of tools already in daily use by one working freelancer:
 an opportunity triage system, a ticket desk, a memory service, and a collection
 of agent routines. Each is useful; together they are a pile of dashboards with
-history trapped in each one. Rheo Stream reconstructs the useful parts as one
+history trapped in each one. rheoStream reconstructs the useful parts as one
 system with clear domain boundaries, portable data, and a single agent interface,
 built so that other people can run it too.
 
@@ -50,7 +50,7 @@ built so that other people can run it too.
 
 A small framework core provides workspaces, permissions, module lifecycle, and
 durable background work. Modules own their own records and cooperate through
-versioned contracts and events; none writes another's tables. Rheo reaches the
+versioned contracts and events; none writes another's tables. rheo reaches the
 system through one MCP facade with goal-level tools, and every call is checked
 against the caller's workspace and permissions. Actions that affect the outside
 world (sending, submitting, paying) require explicit policy and leave an audit
