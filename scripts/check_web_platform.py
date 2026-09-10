@@ -30,13 +30,23 @@ CODE_SUFFIXES = frozenset({".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"})
 # A JS/TS string literal quote: " or ' or ` (backtick as \x60 to avoid quoting noise).
 _QUOTE = r"[\x22'\x60]"
 
+# The two platform-only runtime values Next.js accepts for edge execution. Ordered
+# so the longer literal is tried first (an alternation is left-biased).
+_EDGE_VALUE = r"(?:experimental-edge|edge)"
+
 # import/require/from ... "@vercel/..." — a platform-only package import.
 _VERCEL_IMPORT = re.compile(r"(?:from|import|require)\s*\(?\s*" + _QUOTE + r"@vercel/")
-# export const runtime = 'edge' | "edge" | `edge`
-_EDGE_EXPORT = re.compile(r"export\s+const\s+runtime\s*=\s*(" + _QUOTE + r")edge\1")
-# a runtime: 'edge' key inside a next.config.*
-_EDGE_CONFIG_KEY = re.compile(r"\bruntime\s*:\s*(" + _QUOTE + r")edge\1")
-_NEXT_CONFIG = re.compile(r"^next\.config\.(?:js|mjs|ts|cjs)$")
+# export const runtime = 'edge' | "edge" | `edge` (or 'experimental-edge'): the
+# route-segment / config assignment form.
+_EDGE_EXPORT = re.compile(
+    r"export\s+const\s+runtime\s*=\s*(" + _QUOTE + r")" + _EDGE_VALUE + r"\1"
+)
+# An object-literal runtime: 'edge' | 'experimental-edge' key, e.g. inside
+# `export const config = { runtime: 'edge' }`. Checked in every source file, not
+# only next.config.*, so an edge runtime declared via a config object is caught too.
+_EDGE_CONFIG_KEY = re.compile(
+    r"\bruntime\s*:\s*(" + _QUOTE + r")" + _EDGE_VALUE + r"\1"
+)
 
 
 def _source_files():
@@ -62,8 +72,8 @@ def check():
                 errors.append(f"Platform-only @vercel/* import: {relative}")
             if _EDGE_EXPORT.search(text):
                 errors.append(f"Edge runtime export declared: {relative}")
-        if _NEXT_CONFIG.match(path.name) and _EDGE_CONFIG_KEY.search(text):
-            errors.append(f"Edge runtime configured in next.config: {relative}")
+            if _EDGE_CONFIG_KEY.search(text):
+                errors.append(f"Edge runtime configured: {relative}")
     return errors
 
 

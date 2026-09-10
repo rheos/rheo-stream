@@ -34,10 +34,13 @@ down:
 
 # End-to-end proof that `core` (in compose) and the web shell (under `next start`,
 # outside compose — 0a does not containerize web, spec.md W1) compose without a
-# shared container. Starts postgres + core, waits for both to answer (poll, not a
-# fixed sleep), builds and starts web pointed at the published core, curls both,
-# prints pass/fail, then always tears web and compose down via an EXIT trap. The
-# named Postgres volume means this writes nothing into the tracked tree.
+# shared container. Starts postgres + core, polls (not a fixed sleep) for core to
+# answer and fails loudly if it never does, builds and starts web pointed at the
+# published core, then asserts both seams: core answers /healthz and the web page
+# renders the *healthy* core seam ("contract v...") rather than merely returning
+# 200 (the shell 200s even when it can't reach core). Always tears web and compose
+# down via an EXIT trap. The named Postgres volume means this writes nothing into
+# the tracked tree.
 demo:
 	@set -e; \
 	WEB_PID=""; \
@@ -53,10 +56,15 @@ demo:
 		sleep 1; \
 	done; \
 	echo "Waiting for core /healthz..."; \
+	core_up=0; \
 	for _ in $$(seq 1 60); do \
-		if curl -sf http://localhost:8000/healthz >/dev/null 2>&1; then break; fi; \
+		if curl -sf http://localhost:8000/healthz >/dev/null 2>&1; then core_up=1; break; fi; \
 		sleep 1; \
 	done; \
+	if [ "$$core_up" != 1 ]; then \
+		echo "FAIL  core  http://localhost:8000/healthz did not become ready within 60s"; \
+		exit 1; \
+	fi; \
 	RHEO_CORE_INTERNAL_URL=http://localhost:8000 pnpm -C apps/web build; \
 	RHEO_CORE_INTERNAL_URL=http://localhost:8000 pnpm -C apps/web start & \
 	WEB_PID=$$!; \
@@ -68,13 +76,13 @@ demo:
 	fi; \
 	web_ok=0; \
 	for _ in $$(seq 1 30); do \
-		if curl -sf http://localhost:3000/ >/dev/null 2>&1; then web_ok=1; break; fi; \
+		if curl -s http://localhost:3000/ | grep -q 'contract v'; then web_ok=1; break; fi; \
 		sleep 1; \
 	done; \
 	if [ "$$web_ok" = 1 ]; then \
-		echo "PASS  web   http://localhost:3000/"; \
+		echo "PASS  web   http://localhost:3000/ (core seam healthy: contract v present)"; \
 	else \
-		echo "FAIL  web   http://localhost:3000/"; rc=1; \
+		echo "FAIL  web   http://localhost:3000/ never rendered the healthy core seam (contract v)"; rc=1; \
 	fi; \
 	exit $$rc
 
