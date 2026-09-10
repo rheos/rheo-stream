@@ -11,9 +11,10 @@ liveness probe with no database call.
 tests stay database-free and why ``tests/postgres/test_cli.py`` drives the lifespan
 explicitly to prove the startup sequence.
 
-The ``/auth/*`` routes, ``/api/v1/operations``, the internal listener and ``serve()``
-are 0b2's; the MCP surface is 0c's. ``rheo_app_mcp`` is still imported at module
-scope to record the composition-root import edge the architecture draws.
+The ``/auth/*`` routes, ``/api/v1/operations``, the internal listener, ``serve()``
+and the MCP facade seam are 0b2's; the MCP transport is 0c's. ``rheo_app_mcp`` is
+still imported at module scope to record the composition-root import edge the
+architecture draws.
 """
 
 import asyncio

@@ -13,7 +13,11 @@ from pathlib import Path
 from rheo_core.operations import register_core_operations
 from rheo_core.secrets import check_env_references
 from rheo_core.settings import ResolvedSettings, resolve
-from rheo_core.storage.data_root import resolve_data_root, validate_data_root
+from rheo_core.storage.data_root import (
+    find_checkout_root,
+    resolve_data_root,
+    validate_data_root,
+)
 from rheo_core.storage.postgres import PostgresBackend, get_backend
 
 
@@ -24,22 +28,13 @@ class Bootstrap:
     backend: PostgresBackend
 
 
-def checkout_root(start: Path | None = None) -> Path:
-    """What ``validate_data_root`` treats as the source checkout: the nearest
-    ancestor of the working directory (inclusive) holding a ``.git`` entry or a
-    ``pyproject.toml``, else the working directory itself."""
-    here = (Path.cwd() if start is None else start).resolve()
-    for candidate in (here, *here.parents):
-        if (candidate / ".git").exists() or (candidate / "pyproject.toml").is_file():
-            return candidate
-    return here
-
-
 def data_root() -> Path:
     """Resolve and validate the data root (creating it if absent)."""
     resolution = resolve_data_root()
     return validate_data_root(
-        resolution.path, checkout_root(), explicitly_named=resolution.explicitly_named
+        resolution.path,
+        find_checkout_root(),
+        explicitly_named=resolution.explicitly_named,
     )
 
 

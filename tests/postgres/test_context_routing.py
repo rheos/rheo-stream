@@ -21,30 +21,37 @@ are not claimed here.
 """
 
 import inspect
+import logging
 from uuid import UUID
 
 import pytest
 from conftest import ClusterSession, MakeWorkspace
 from harness.records import ensure_note_table, get_note, list_notes
 from harness.registry import (
+    NOTE_EXPLODE,
     NOTE_GET,
     NOTE_WRITE,
+    NoteWriteInput,
     add_member,
     enable_harness_module,
     probe_declaration,
     probe_handler,
     register_harness,
     reserved_field_models,
+    resolve_note,
 )
 from harness.settings_keys import HARNESS_MEMBER
 from pydantic import BaseModel, ConfigDict
 from rheo_contracts import RESERVED_INPUT_FIELDS, RecordRef, Role, WorkspaceContext
 from rheo_core.boundary import context_for_harness, context_for_operator
 from rheo_core.operations import (
+    FAILED,
+    HANDLER_FAILED,
     MODULE_DISABLED,
     REGISTRY,
     SETTINGS_SET,
     SETTINGS_SET_MEMBER,
+    OperationError,
     OperationRegistry,
     RegistrationRefused,
     dispatch,
@@ -56,10 +63,11 @@ from rheo_core.refs.resolver import (
     REFERENCE_MALFORMED,
     UNRESOLVABLE,
     RecordHead,
+    ResolverRegistry,
     Unavailable,
     resolve,
 )
-from rheo_core.settings import TEST_HARNESS_ORIGIN
+from rheo_core.settings import CORE_ORIGIN, TEST_HARNESS_ORIGIN
 from rheo_core.settings import resolve as resolve_settings
 from rheo_core.settings.storage_source import PostgresOverrideSource
 from rheo_core.storage.backend import UnitOfWork
@@ -172,6 +180,46 @@ def test_registering_an_input_model_that_allows_extra_keys_is_refused() -> None:
     assert "harness.probe.leaky" not in registry
 
 
+def test_the_harness_origin_is_test_profile_only_in_both_registries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    declaration = probe_declaration("harness.probe.gate", NoteWriteInput)
+    # Under the test profile the test_harness origin is accepted by both registries.
+    OperationRegistry().register(declaration, probe_handler, origin=TEST_HARNESS_ORIGIN)
+    ResolverRegistry().register(
+        "harness", "probe", resolve_note, origin=TEST_HARNESS_ORIGIN
+    )
+    # Under any other profile it is refused, and so is an origin that merely names
+    # the harness module id for itself: ``harness`` is reserved for ``test_harness``.
+    for profile in ("production", "development"):
+        monkeypatch.setenv("RHEO_PROFILE", profile)
+        for origin in (TEST_HARNESS_ORIGIN, "harness"):
+            with pytest.raises(RegistrationRefused) as excinfo:
+                OperationRegistry().register(declaration, probe_handler, origin=origin)
+            assert excinfo.value.operation_name in {"harness.probe.gate", origin}
+            with pytest.raises(RegistrationRefused):
+                ResolverRegistry().register(
+                    "harness", "probe", resolve_note, origin=origin
+                )
+    monkeypatch.setenv("RHEO_PROFILE", "test")
+    # Reserved even under the test profile: only ``test_harness`` owns ``harness``.
+    with pytest.raises(RegistrationRefused, match="reserved"):
+        OperationRegistry().register(declaration, probe_handler, origin="harness")
+    with pytest.raises(RegistrationRefused, match="reserved"):
+        ResolverRegistry().register("harness", "probe", resolve_note, origin="harness")
+    # The core origin cannot take a harness prefix, and a module cannot take core's.
+    with pytest.raises(RegistrationRefused, match="prefix"):
+        OperationRegistry().register(declaration, probe_handler, origin=CORE_ORIGIN)
+    with pytest.raises(RegistrationRefused, match="prefix"):
+        ResolverRegistry().register("core", "probe", resolve_note, origin="leads")
+    with pytest.raises(RegistrationRefused, match="prefix"):
+        OperationRegistry().register(
+            probe_declaration("core.probe.gate", NoteWriteInput),
+            probe_handler,
+            origin="leads",
+        )
+
+
 # --- the dispatch channel -------------------------------------------------------------
 
 
@@ -239,6 +287,35 @@ def test_a_harness_operation_is_module_disabled_where_harness_is_not_enabled(
     assert resolve(unregistered, ctx) == Unavailable(unregistered, UNRESOLVABLE)
     malformed = resolve("not a reference", ctx)
     assert malformed == Unavailable("not a reference", REFERENCE_MALFORMED)
+
+
+def test_a_handler_exception_rolls_back_and_yields_a_fixed_failure_code(
+    cluster: ClusterSession,
+    two_workspaces: tuple[WorkspaceRow, WorkspaceRow],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    a, _ = two_workspaces
+    ctx = _operator(a.id)
+    caplog.set_level(logging.ERROR, logger="rheo_core.operations")
+    message = "[SQL: SELECT 1] [parameters: {'token': 'hunter2'}]"
+    outcome = dispatch(
+        ctx, NOTE_EXPLODE, {"body": "written, then rolled back", "message": message}
+    )
+    assert outcome.state == FAILED
+    assert outcome.result is None
+    # A fixed code from the refusal vocabulary and the class name only: the message
+    # (a driver error would carry the statement and its parameters) never reaches
+    # the outcome.
+    assert outcome.error == OperationError(HANDLER_FAILED, "RuntimeError")
+    assert "hunter2" not in outcome.error.error_text
+    # The write before the raise was rolled back.
+    with _uow(cluster, a) as uow:
+        assert list_notes(uow.connection) == ()
+    # The exception went to the log, tagged with the request id.
+    (record,) = [r for r in caplog.records if r.getMessage() == "operation_failed"]
+    assert record.request_id == str(ctx.request_id)  # type: ignore[attr-defined]
+    assert record.operation == NOTE_EXPLODE  # type: ignore[attr-defined]
+    assert record.exc_info is not None and "hunter2" in caplog.text
 
 
 def test_a_settings_write_in_a_leaves_b_unchanged_through_the_registry(

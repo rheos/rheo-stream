@@ -4,10 +4,11 @@ and ``pg_trgm``.
 
 The privilege report is kept in this run per the run spec (Technical Risks item 11):
 nothing in 0b installs an extension, but ``storage.template_database`` and this
-report ship now so phase 2 meets a documented remedy rather than a surprise. It
-reads the catalogs only and never runs ``CREATE EXTENSION``: an extension is
-creatable by a superuser, or by a role with ``CREATE`` on the database when the
-extension is marked trusted (Postgres 13+).
+report ship now so phase 2 meets a documented remedy rather than a surprise. The
+catalog reads live on the storage backend (``PostgresBackend.server_version`` /
+``extension_report``: read only, never a ``CREATE EXTENSION``); this module only
+formats them. An extension is creatable by a superuser, or by a role with ``CREATE``
+on the database when the extension is marked trusted (Postgres 13+).
 
 Each check is one line on stdout (``ok``, ``warn`` or ``FAIL``); the exit code is 1
 when any check failed. Every step runs even when an earlier one failed, so one
@@ -31,7 +32,6 @@ from rheo_core.storage.control_plane import list_workspaces
 from rheo_core.storage.control_tables import WorkspaceState
 from rheo_core.storage.data_root import DataRootRefusal, resolve_data_root
 from rheo_core.storage.postgres import PostgresBackend, get_backend
-from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from rheo_app_cli.context import data_root
@@ -80,8 +80,7 @@ def _check_settings() -> Check:
 def _check_cluster() -> tuple[Check, PostgresBackend | None]:
     try:
         backend = get_backend()
-        with backend.maintenance_connection() as connection:
-            version = connection.execute(text("SHOW server_version")).scalar_one()
+        version = backend.server_version()
     except (SettingsError, SecretRefusal, ValueError) as refusal:
         return Check("cluster", "FAIL", str(refusal)), None
     except SQLAlchemyError as exc:
@@ -122,68 +121,32 @@ def _check_workspaces(backend: PostgresBackend) -> Iterator[Check]:
 
 
 def _check_extensions(backend: PostgresBackend) -> Iterator[Check]:
-    template = backend.template_database
     try:
-        with backend.maintenance_connection() as connection:
-            superuser = bool(
-                connection.execute(
-                    text("SELECT rolsuper FROM pg_roles WHERE rolname = current_user")
-                ).scalar_one()
-            )
-            may_create_in_template = bool(
-                connection.execute(
-                    text("SELECT has_database_privilege(:db, 'CREATE')"),
-                    {"db": template},
-                ).scalar_one()
-            )
-            available = {
-                str(row.name): (row.default_version, row.installed_version)
-                for row in connection.execute(
-                    text(
-                        "SELECT name, default_version, installed_version "
-                        "FROM pg_available_extensions WHERE name = ANY(:names)"
-                    ),
-                    {"names": list(EXTENSIONS)},
-                )
-            }
-            trusted = {
-                str(row.name): bool(row.trusted)
-                for row in connection.execute(
-                    text(
-                        "SELECT v.name, v.trusted "
-                        "FROM pg_available_extension_versions v "
-                        "JOIN pg_available_extensions e ON e.name = v.name "
-                        "AND e.default_version = v.version "
-                        "WHERE v.name = ANY(:names)"
-                    ),
-                    {"names": list(EXTENSIONS)},
-                )
-            }
+        report = backend.extension_report(EXTENSIONS)
     except SQLAlchemyError as exc:
         yield Check("extensions", "FAIL", f"cannot read catalogs: {type(exc).__name__}")
         return
-    for name in EXTENSIONS:
-        if name not in available:
+    for extension in report.extensions:
+        if extension.default_version is None:
             yield Check(
-                f"extension {name}",
+                f"extension {extension.name}",
                 "warn",
                 "not available on this cluster (phase 2 needs it installed)",
             )
             continue
-        default_version, installed = available[name]
-        is_trusted = trusted.get(name, False)
-        may_create = superuser or (is_trusted and may_create_in_template)
+        may_create = report.may_create(extension)
         how = (
             "superuser"
-            if superuser
+            if report.role_is_superuser
             else ("trusted + CREATE on the database" if may_create else "no")
         )
         yield Check(
-            f"extension {name}",
+            f"extension {extension.name}",
             "ok" if may_create else "warn",
-            f"available {default_version}; installed in maintenance db: "
-            f"{installed or 'no'}; trusted: {'yes' if is_trusted else 'no'}; "
-            f"role may CREATE EXTENSION in {template}: {how}",
+            f"available {extension.default_version}; installed in maintenance db: "
+            f"{extension.installed_version or 'no'}; trusted: "
+            f"{'yes' if extension.trusted else 'no'}; role may CREATE EXTENSION in "
+            f"{report.template_database}: {how}",
         )
 
 

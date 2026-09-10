@@ -19,6 +19,7 @@ provisioning step 2 treats "already exists" as a retry.
 import threading
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 from uuid import UUID
 
@@ -85,6 +86,39 @@ def advisory_lock(conn: Connection, key: int) -> None:
     if not isinstance(key, int) or isinstance(key, bool):
         raise TypeError("an advisory lock key is an int")
     conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+
+
+@dataclass(frozen=True, slots=True)
+class ExtensionAvailability:
+    """One extension as the cluster's catalogs describe it. ``default_version`` is
+    ``None`` when the cluster does not ship it; ``installed_version`` is its state
+    in the maintenance database; ``trusted`` is Postgres 13+'s flag that lets a
+    non-superuser with ``CREATE`` on a database create it."""
+
+    name: str
+    default_version: str | None
+    installed_version: str | None
+    trusted: bool | None
+
+
+@dataclass(frozen=True, slots=True)
+class ExtensionReport:
+    """The catalog facts behind ``rheo doctor``'s ``CREATE EXTENSION`` privilege
+    report: read only, never a ``CREATE EXTENSION``."""
+
+    template_database: str
+    role_is_superuser: bool
+    role_may_create_in_template: bool
+    extensions: tuple[ExtensionAvailability, ...]
+
+    def may_create(self, extension: ExtensionAvailability) -> bool:
+        """Whether the connecting role could ``CREATE EXTENSION`` it in the template
+        database: a superuser always; otherwise a trusted extension with ``CREATE``."""
+        if extension.default_version is None:
+            return False
+        return self.role_is_superuser or (
+            bool(extension.trusted) and self.role_may_create_in_template
+        )
 
 
 class PostgresBackend:
@@ -205,6 +239,66 @@ class PostgresBackend:
         """Create ``control_database`` if absent; a concurrent creator winning the race
         is success."""
         return self.ensure_database(self.control_database)
+
+    # --- catalog readers (rheo doctor) ------------------------------------------------
+
+    def server_version(self) -> str:
+        """The cluster's ``server_version``, read on the maintenance connection."""
+        with self.maintenance_connection() as connection:
+            return str(connection.execute(text("SHOW server_version")).scalar_one())
+
+    def extension_report(self, names: Sequence[str]) -> ExtensionReport:
+        """Availability, trust and the connecting role's privilege for ``names``."""
+        wanted = [str(name) for name in names]
+        with self.maintenance_connection() as connection:
+            superuser = bool(
+                connection.execute(
+                    text("SELECT rolsuper FROM pg_roles WHERE rolname = current_user")
+                ).scalar_one()
+            )
+            may_create = bool(
+                connection.execute(
+                    text("SELECT has_database_privilege(:db, 'CREATE')"),
+                    {"db": self.template_database},
+                ).scalar_one()
+            )
+            available = {
+                str(row.name): (row.default_version, row.installed_version)
+                for row in connection.execute(
+                    text(
+                        "SELECT name, default_version, installed_version "
+                        "FROM pg_available_extensions WHERE name = ANY(:names)"
+                    ),
+                    {"names": wanted},
+                )
+            }
+            trusted = {
+                str(row.name): bool(row.trusted)
+                for row in connection.execute(
+                    text(
+                        "SELECT v.name, v.trusted "
+                        "FROM pg_available_extension_versions v "
+                        "JOIN pg_available_extensions e ON e.name = v.name "
+                        "AND e.default_version = v.version "
+                        "WHERE v.name = ANY(:names)"
+                    ),
+                    {"names": wanted},
+                )
+            }
+        return ExtensionReport(
+            template_database=self.template_database,
+            role_is_superuser=superuser,
+            role_may_create_in_template=may_create,
+            extensions=tuple(
+                ExtensionAvailability(
+                    name=name,
+                    default_version=available.get(name, (None, None))[0],
+                    installed_version=available.get(name, (None, None))[1],
+                    trusted=trusted.get(name),
+                )
+                for name in wanted
+            ),
+        )
 
     # --- the StorageBackend protocol --------------------------------------------------
 

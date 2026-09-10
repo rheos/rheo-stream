@@ -135,6 +135,18 @@ def resolve_data_root(
     return DataRootResolution(platform_data_dir(environ=env), DataRootSource.PLATFORM)
 
 
+def find_checkout_root(start: Path | None = None) -> Path:
+    """What :func:`validate_data_root` treats as the source checkout when a process
+    must find it for itself: the nearest ancestor of ``start`` (default: the working
+    directory), inclusive, holding a ``.git`` entry or a ``pyproject.toml``, else
+    ``start`` itself. Shared by the ``rheo`` command and the ``core`` startup."""
+    here = (Path.cwd() if start is None else Path(start)).resolve()
+    for candidate in (here, *here.parents):
+        if (candidate / ".git").exists() or (candidate / "pyproject.toml").is_file():
+            return candidate
+    return here
+
+
 def validate_data_root(
     path: Path, checkout_root: Path, *, explicitly_named: bool
 ) -> Path:

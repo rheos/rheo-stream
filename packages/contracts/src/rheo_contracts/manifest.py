@@ -103,4 +103,10 @@ class OperationDeclaration(BaseModel):
     output: type[BaseModel]
     idempotency: Idempotency
     audit: AuditSpec | None = None
-    """Required non-``None`` above ``READ``; the registry refuses at registration."""
+    """Required non-``None`` above ``READ``.
+
+    The refusal that enforces it — "class above ``READ`` with ``audit = None``:
+    refused, naming the operation" (``module-contract.md`` § Registration rules) —
+    arrives with 0c2's registration assertions (criterion 14). The 0b1 registry
+    stores the declaration and does not check this field.
+    """

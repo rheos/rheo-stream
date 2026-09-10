@@ -7,14 +7,17 @@ Then ``authorize``; then the payload is validated into the declaration's input m
 (``input_invalid``, naming the failing fields but never echoing values); then **one**
 ``UnitOfWork`` is opened through ``route(ctx)``, the handler runs, and the unit of
 work commits. A handler that raises :class:`OperationRefused` (or a
-``StorageRefusal``) rolls back and yields that state; any other exception rolls back
-and yields ``failed`` with the exception's class name as the code.
+``StorageRefusal``) rolls back and yields that state; any other exception rolls back,
+is logged with the context's ``request_id``, and yields ``failed`` with the fixed
+code ``handler_failed`` and only the exception's class name as the text — never its
+message, which for a driver error carries the statement and its parameters.
 
 And nothing else. No audit row, no operation record, no outbox event, no
 ``operation_id`` minted — run 0c's scored work, deliberately absent here. See the
 comment in the dispatcher body.
 """
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
@@ -25,6 +28,7 @@ from rheo_contracts import WorkspaceContext
 from rheo_core.boundary.context import CONTEXT_REQUIRED, Refusal
 from rheo_core.operations.refusals import (
     FAILED,
+    HANDLER_FAILED,
     INPUT_INVALID,
     OUTPUT_INVALID,
     SUCCEEDED,
@@ -33,6 +37,8 @@ from rheo_core.operations.refusals import (
 from rheo_core.operations.registry import REGISTRY, OperationRegistry
 from rheo_core.storage.backend import StorageRefusal, UnitOfWork
 from rheo_core.storage.routing import open_unit_of_work
+
+logger = logging.getLogger("rheo_core.operations")
 
 _DETAIL_LIMIT: Final = 2000
 
@@ -137,8 +143,18 @@ def dispatch(
             return _refused(refusal.state, refusal.detail)
         except Exception as exc:
             _rollback(uow)
+            # The exception text is for the log, never the outcome: a driver error
+            # renders the statement and its parameters, and ``error_text`` is
+            # documented as safe to show.
+            logger.exception(
+                "operation_failed",
+                extra={
+                    "operation": name,
+                    "workspace_id": str(ctx.workspace_id),
+                    "request_id": str(ctx.request_id),
+                },
+            )
             return OperationOutcome(
-                FAILED,
-                error=OperationError(type(exc).__name__, str(exc)[:_DETAIL_LIMIT]),
+                FAILED, error=OperationError(HANDLER_FAILED, type(exc).__name__)
             )
     return OperationOutcome(SUCCEEDED, result=output)

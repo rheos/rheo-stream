@@ -13,8 +13,10 @@ alone.
 - The other three comparators (``union``, ``subset``, ``and``) through C2's harness
   keys, each refused when looser and accepted when tighter.
 - The same write under a ``member`` harness context is ``role_not_permitted``; the
-  ``owner`` write succeeds. ``core.settings.set_member`` accepts owner and member
-  for a member-scope key and refuses a workspace-scope key ``setting_scope``.
+  ``owner`` write succeeds. Both settings operations refuse an ``operator`` context
+  too: ``operator`` is enumerated where it applies and is not an implicit superset.
+  ``core.settings.set_member`` accepts owner and member for a member-scope key and
+  refuses a workspace-scope key ``setting_scope``.
 """
 
 from uuid import UUID
@@ -30,14 +32,20 @@ from harness.settings_keys import (
     HARNESS_MEMBER,
 )
 from rheo_contracts import Role, WorkspaceContext
-from rheo_core.boundary import context_for_harness
+from rheo_core.boundary import context_for_harness, context_for_operator
 from rheo_core.operations import (
     ROLE_NOT_PERMITTED,
     SETTINGS_SET,
     SETTINGS_SET_MEMBER,
+    WORKSPACE_STATUS,
     OperationOutcome,
     dispatch,
     register_core_operations,
+)
+from rheo_core.operations.core_ops import (
+    SETTINGS_SET_DECLARATION,
+    SETTINGS_SET_MEMBER_DECLARATION,
+    WORKSPACE_STATUS_DECLARATION,
 )
 from rheo_core.settings import SettingValue, resolve
 from rheo_core.settings.storage_source import PostgresOverrideSource
@@ -243,6 +251,38 @@ def test_the_write_is_role_not_permitted_under_a_member_context(
     assert _rows(cluster, workspace) == rows_before
     assert _set(owner, TOKEN_DAYS_CLI, 30).ok
     assert _rows(cluster, workspace)[TOKEN_DAYS_CLI] == "30"
+
+
+def test_operator_is_not_an_implicit_superset_for_the_settings_operations(
+    cluster: ClusterSession, workspace: UUID, owner: WorkspaceContext
+) -> None:
+    """The load-bearing sentence of this chunk: ``operator`` is enumerated where it
+    applies (``core.workspace.status``) and is not a superset of ``owner``."""
+    operator = context_for_operator(workspace)
+    assert isinstance(operator, WorkspaceContext)
+    rows_before = _rows(cluster, workspace)
+    for name, payload in (
+        (SETTINGS_SET, {"key": TOKEN_DAYS_CLI, "value": 30}),
+        (SETTINGS_SET_MEMBER, {"key": HARNESS_MEMBER, "value": "operator-pref"}),
+    ):
+        outcome = dispatch(operator, name, payload)
+        assert outcome.state == ROLE_NOT_PERMITTED, (name, outcome)
+        assert outcome.error is not None
+        assert outcome.error.error_code == ROLE_NOT_PERMITTED
+        assert outcome.result is None
+    assert _rows(cluster, workspace) == rows_before
+    # The same operator may read status; the same owner may write.
+    assert dispatch(operator, WORKSPACE_STATUS, {}).ok
+    assert _set(owner, TOKEN_DAYS_CLI, 30).ok
+    # And the ratified role sets, on the declarations themselves.
+    assert SETTINGS_SET_DECLARATION.roles == frozenset({Role.OWNER})
+    assert SETTINGS_SET_MEMBER_DECLARATION.roles == frozenset({Role.OWNER, Role.MEMBER})
+    assert WORKSPACE_STATUS_DECLARATION.roles == frozenset(
+        {Role.OWNER, Role.MEMBER, Role.OPERATOR}
+    )
+    assert Role.OPERATOR not in (
+        SETTINGS_SET_DECLARATION.roles | SETTINGS_SET_MEMBER_DECLARATION.roles
+    )
 
 
 def test_set_member_writes_the_callers_own_row_for_owner_and_member(

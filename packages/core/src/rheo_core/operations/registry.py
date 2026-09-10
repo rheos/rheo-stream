@@ -7,9 +7,9 @@ contracts import scan, B14); here it is importable and mypy strict checks the
 
 - the name is ``<module_id>.<noun>.<verb>`` and its prefix is ``core`` for the core
   origin or the registering origin's module id otherwise (a module cannot register a
-  ``core.*`` operation, and the core cannot register a module's);
-- ``origin = "test_harness"`` is accepted only when the resolved ``profile`` is
-  ``test``;
+  ``core.*`` operation, and the core cannot register a module's); ``harness`` is
+  reserved for the ``test_harness`` origin, which is accepted only when the resolved
+  ``profile`` is ``test`` (:func:`check_origin`, shared with the resolver registry);
 - ``safety_class`` is present (the declaration model makes it required; a
   ``model_construct``-ed declaration without one is refused naming the operation —
   the *startup-fails-naming-it* wiring and the production-profile assertion of
@@ -40,6 +40,7 @@ from rheo_contracts import (
     OperationDeclaration,
     SafetyClass,
     WorkspaceContext,
+    is_reserved_module,
 )
 
 from rheo_core.boundary.context import CONTEXT_REQUIRED, Refusal
@@ -87,6 +88,36 @@ def check_origin_profile(origin: str) -> None:
                 f"origin {origin!r} is accepted only under profile = test (resolved "
                 f"profile is {profile!r})",
             )
+
+
+def check_origin(origin: str, module_id: str, *, name: str) -> None:
+    """The one origin rule both registries (operations and record resolvers) apply.
+
+    The module id must be the registering origin's; ``harness`` is reserved for the
+    ``test_harness`` origin and ``core`` for the core origin, whatever module id an
+    origin string claims for itself (so ``origin = "harness"`` cannot slip past the
+    profile gate by naming the module directly); and the ``test_harness`` origin is
+    accepted only under ``profile = test``. Criterion 18's production-profile
+    assertion (0c3) leans on this gate.
+    """
+    expected = module_id_for_origin(origin)
+    if module_id != expected:
+        raise RegistrationRefused(
+            name,
+            f"prefix {module_id!r} is not the registering origin's module id "
+            f"{expected!r}",
+        )
+    if module_id == HARNESS_MODULE_ID and origin != TEST_HARNESS_ORIGIN:
+        raise RegistrationRefused(
+            name,
+            f"module id {HARNESS_MODULE_ID!r} is reserved for origin "
+            f"{TEST_HARNESS_ORIGIN!r}",
+        )
+    if is_reserved_module(module_id) and origin != CORE_ORIGIN:
+        raise RegistrationRefused(
+            name, f"module id {module_id!r} is reserved for origin {CORE_ORIGIN!r}"
+        )
+    check_origin_profile(origin)
 
 
 def _alias_names(model: type[BaseModel]) -> set[str]:
@@ -153,14 +184,7 @@ class OperationRegistry:
                 str(name), "operation names are <module_id>.<noun>.<verb>"
             )
         module_id = name.split(".", 1)[0]
-        expected = module_id_for_origin(origin)
-        if module_id != expected:
-            raise RegistrationRefused(
-                name,
-                f"prefix {module_id!r} is not the registering origin's module id "
-                f"{expected!r}",
-            )
-        check_origin_profile(origin)
+        check_origin(origin, module_id, name=name)
         if not isinstance(getattr(decl, "safety_class", None), SafetyClass):
             raise RegistrationRefused(name, "declares no safety class")
         input_model = decl.input_model

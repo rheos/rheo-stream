@@ -24,7 +24,11 @@ from rheo_core.migrations.orchestrator import (
 from rheo_core.operations import register_core_operations
 from rheo_core.secrets import check_env_references
 from rheo_core.settings import PROFILE_KEY, resolve
-from rheo_core.storage.data_root import resolve_data_root, validate_data_root
+from rheo_core.storage.data_root import (
+    find_checkout_root,
+    resolve_data_root,
+    validate_data_root,
+)
 from rheo_core.storage.postgres import get_backend
 
 logger = logging.getLogger("rheo_app_core.startup")
@@ -42,23 +46,14 @@ class StartupReport:
     operations: tuple[str, ...]
 
 
-def checkout_root(start: Path | None = None) -> Path:
-    """What ``validate_data_root`` treats as the source checkout: the nearest
-    ancestor of the working directory (inclusive) holding a ``.git`` entry or a
-    ``pyproject.toml``, else the working directory itself."""
-    here = (Path.cwd() if start is None else start).resolve()
-    for candidate in (here, *here.parents):
-        if (candidate / ".git").exists() or (candidate / "pyproject.toml").is_file():
-            return candidate
-    return here
-
-
 def run_startup() -> StartupReport:
     """The sequence in the module docstring; blocking, run off the event loop."""
     settings = resolve()
     resolution = resolve_data_root()
     root = validate_data_root(
-        resolution.path, checkout_root(), explicitly_named=resolution.explicitly_named
+        resolution.path,
+        find_checkout_root(),
+        explicitly_named=resolution.explicitly_named,
     )
     env_references = check_env_references(settings)
     backend = get_backend()

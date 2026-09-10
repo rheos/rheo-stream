@@ -1,8 +1,10 @@
 """Harness registrations under ``profile = test`` with origin ``test_harness``: the
 ``harness.note`` record type (a resolver over the table ``tests/harness/records.py``
 creates through the storage backend, never a shipped migration), the operations
-``harness.note.get(ref)`` and ``harness.note.write(body)``, and the scaffolding B2
-needs to drive the reserved-field refusal.
+``harness.note.get(ref)``, ``harness.note.write(body)`` and
+``harness.note.explode(body, message)`` (a handler that raises after writing, for the
+dispatcher's rollback and failure envelope), and the scaffolding B2 needs to drive
+the reserved-field refusal.
 
 Also two pieces of control-plane scaffolding the C4 tests share: ``add_member``
 (an account plus its ``control.membership`` row through C3's repositories, because
@@ -58,6 +60,7 @@ from harness.records import HARNESS_SCHEMA, ensure_note_table, get_note, write_n
 NOTE_RECORD_TYPE: Final = "note"
 NOTE_GET: Final = "harness.note.get"
 NOTE_WRITE: Final = "harness.note.write"
+NOTE_EXPLODE: Final = "harness.note.explode"
 
 _ALL_THREE_ROLES: Final = frozenset({Role.OWNER, Role.MEMBER, Role.OPERATOR})
 # See ``rheo_core.operations.core_ops`` for why ``ignore`` (the default) is stated.
@@ -147,6 +150,34 @@ def _write_note(
     return NoteWritten(ref=note_ref(row.id), body=row.body)
 
 
+class NoteExplodeInput(BaseModel):
+    """``body`` is written first, then the handler raises ``RuntimeError(message)``:
+    the dispatcher must roll the write back and must not echo ``message``."""
+
+    model_config = _IGNORE_EXTRA
+
+    body: str
+    message: str
+
+
+def _explode(
+    ctx: WorkspaceContext, uow: UnitOfWork, model_input: NoteExplodeInput
+) -> NoteWritten:
+    ensure_note_table(uow.connection)
+    write_note(uow.connection, body=model_input.body)
+    raise RuntimeError(model_input.message)
+
+
+NOTE_EXPLODE_DECLARATION: Final = OperationDeclaration(
+    name=NOTE_EXPLODE,
+    safety_class=SafetyClass.MUTATE,
+    roles=_ALL_THREE_ROLES,
+    input_model=NoteExplodeInput,
+    output=NoteWritten,
+    idempotency=Idempotency.NONE,
+    audit=AuditSpec(subject_field=None),
+)
+
 NOTE_GET_DECLARATION: Final = OperationDeclaration(
     name=NOTE_GET,
     safety_class=SafetyClass.READ,
@@ -177,6 +208,7 @@ def register_harness(
     )
     registry.register(NOTE_GET_DECLARATION, _get_note, origin=TEST_HARNESS_ORIGIN)
     registry.register(NOTE_WRITE_DECLARATION, _write_note, origin=TEST_HARNESS_ORIGIN)
+    registry.register(NOTE_EXPLODE_DECLARATION, _explode, origin=TEST_HARNESS_ORIGIN)
 
 
 # --- B2 scaffolding: input models a registration must refuse --------------------------

@@ -31,8 +31,7 @@ from rheo_contracts import (
 
 from rheo_core.boundary.context import CONTEXT_REQUIRED
 from rheo_core.operations.refusals import MODULE_DISABLED, RegistrationRefused
-from rheo_core.operations.registry import check_origin_profile, module_id_for_origin
-from rheo_core.settings import CORE_ORIGIN
+from rheo_core.operations.registry import check_origin
 from rheo_core.storage.backend import StorageRefusal, UnitOfWork
 from rheo_core.storage.routing import open_unit_of_work
 
@@ -95,23 +94,15 @@ class ResolverRegistry:
     ) -> None:
         """Bind ``resolver`` to ``<module_id>.<record_type>``.
 
-        The module id must be the registering origin's (a module cannot claim the
-        reserved ``core`` segment); ``origin = "test_harness"`` is accepted under
-        ``profile = test`` only. Re-registering the same resolver is a no-op.
+        The module id must be the registering origin's, ``core`` and ``harness``
+        are reserved for their origins, and ``origin = "test_harness"`` is accepted
+        under ``profile = test`` only — the operation registry's ``check_origin``,
+        applied here too. Re-registering the same resolver is a no-op.
         """
         key = f"{module_id}.{record_type}"
         if not (_SEGMENT.fullmatch(module_id) and _SEGMENT.fullmatch(record_type)):
             raise RegistrationRefused(key, "record types are <module_id>.<type>")
-        expected = module_id_for_origin(origin)
-        if module_id != expected or (
-            is_reserved_module(module_id) and origin != CORE_ORIGIN
-        ):
-            raise RegistrationRefused(
-                key,
-                f"module {module_id!r} is not the registering origin's module id "
-                f"{expected!r}",
-            )
-        check_origin_profile(origin)
+        check_origin(origin, module_id, name=key)
         if not callable(resolver):
             raise TypeError("a record resolver must be callable")
         existing = self._resolvers.get((module_id, record_type))

@@ -18,11 +18,15 @@ OUTPUT_INVALID: Final = "output_invalid"
 
 SUCCEEDED: Final = "succeeded"
 FAILED: Final = "failed"
+HANDLER_FAILED: Final = "handler_failed"
+"""The fixed ``error_code`` of a ``failed`` outcome whose handler raised."""
 
 AUTHORIZATION_STATES: Final = frozenset(
     {OPERATION_UNKNOWN, OPERATION_NOT_PERMITTED, MODULE_DISABLED, ROLE_NOT_PERMITTED}
 )
-"""The four states ``authorize`` can return, in the order it checks them."""
+"""The four authorization refusals, in the order ``authorize`` checks them.
+``authorize`` also returns ``context_required`` (from ``rheo_core.boundary``) before
+any of them when handed something that is not a context."""
 
 
 class RegistrationRefused(Exception):

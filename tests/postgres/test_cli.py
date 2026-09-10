@@ -37,7 +37,7 @@ from rheo_core.storage.control_plane import (
 from rheo_core.storage.control_tables import WorkspaceState
 from rheo_core.storage.postgres import get_backend
 from rheo_core.storage.provisioning import database_name_for
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
 
 pytestmark = pytest.mark.postgres
 
@@ -85,7 +85,6 @@ def test_no_subcommand_prints_usage_and_returns_zero(
     assert code == 0
     assert out.startswith("usage: rheo")
     assert err == ""
-    assert main(None if False else []) == 0
 
 
 def test_help_and_usage_errors_return_instead_of_exiting(
@@ -271,13 +270,39 @@ async def test_lifespan_runs_startup_and_healthz_stays_database_free(
         )
         by_id = {result.workspace_id: result for result in report.workspaces}
         assert by_id[workspace].ok is True
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://t"
-        ) as client:
-            response = await client.get("/healthz")
+        # /healthz makes no database call: capture every statement on the control
+        # engine and on this workspace's engine while it answers.
+        database_name = cluster.registry_row(workspace).database_name
+        engines = (
+            cluster.backend.control_engine,
+            cluster.backend.pools.engine_for(database_name),
+        )
+        captured: list[str] = []
+
+        def capture(
+            conn: object,
+            cursor: object,
+            statement: str,
+            parameters: object,
+            context: object,
+            executemany: bool,
+        ) -> None:
+            captured.append(statement)
+
+        for engine in engines:
+            event.listen(engine, "before_cursor_execute", capture)
+        try:
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://t"
+            ) as client:
+                response = await client.get("/healthz")
+        finally:
+            for engine in engines:
+                event.remove(engine, "before_cursor_execute", capture)
         assert response.status_code == 200
         assert response.json() == {"status": "ok", "contract_version": 1}
+        assert captured == []
     # Shutdown disposed the engines and left the backend bound: the session's
     # backend is still the process-wide one, and its engines recreate on use.
     assert get_backend() is cluster.backend
