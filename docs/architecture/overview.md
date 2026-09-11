@@ -7,7 +7,7 @@ carry the contracts.
 
 ## What the system is
 
-Rheo Stream is a **modular monolith with a durable worker**, as the idea document prefers. One
+rheoStream is a **modular monolith with a durable worker**, as the idea document prefers. One
 Python application holds the framework core and every installed module in one process image.
 Three surfaces call the same application services: the web interface, the MCP facade, and intake.
 Background effects run in a worker that reads persisted work records from each workspace's

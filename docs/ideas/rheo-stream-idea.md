@@ -1,4 +1,4 @@
-# Rheo Stream — idea document
+# rheoStream — idea document
 
 **Status:** Foundational idea document, not a final specification or build plan  
 **Started:** 2026-09-08  
@@ -12,7 +12,7 @@ specification work.
 
 ## Purpose of this document
 
-This document gathers the current Rheo Stream idea into one coherent starting
+This document gathers the current rheoStream idea into one coherent starting
 point. Its job is to establish the product thesis, vocabulary, boundaries,
 architectural direction, and important constraints before detailed requirements,
 a final technical specification, or an implementation plan are written.
@@ -24,12 +24,12 @@ implementation convenience into a permanent product constraint.
 
 ## The idea
 
-**Rheo Stream** is an open, self-hostable framework for composing agent-assisted
+**rheoStream** is an open, self-hostable framework for composing agent-assisted
 working environments. Its first reference configuration serves a freelance web
 developer and software entrepreneur: **Leads** develops opportunities,
 **Current** carries active work, and **Recallatron** retains useful context. These
 are the first official modules, with further modules and integrations added as
-different professional workflows need them. An agent named **Rheo** operates the
+different professional workflows need them. An agent named **rheo** operates the
 enabled capabilities through a stable, goal-oriented MCP interface. People can
 interact through Claude, Telegram, direct voice, and eventually other clients. The
 same domain contracts should support private installations, collaborating teams,
@@ -48,7 +48,7 @@ procedures belong in modules and configuration, outside the framework core.
 
 > Leads enter the stream. Current carries the work. Recallatron remembers.
 
-## Why Rheo Stream should exist
+## Why rheoStream should exist
 
 The present tools contain useful capabilities, but their product boundaries and
 names reflect the order in which they were built:
@@ -73,15 +73,15 @@ the same extension contracts available to later configurations.
 
 ## Product thesis
 
-Rheo Stream should feel like one continuous working environment rather than a
+rheoStream should feel like one continuous working environment rather than a
 collection of dashboards. A lead discovered today can become tomorrow's project;
 the decisions, people, promises, and lessons surrounding it can remain available
-months later. Rheo provides the conversational continuity, while the underlying
+months later. rheo provides the conversational continuity, while the underlying
 modules remain explicit systems of record.
 
 The central product ideas are:
 
-1. **Conversation is an interface, not the database.** Rheo can reason and act
+1. **Conversation is an interface, not the database.** rheo can reason and act
    across the system, but authoritative records live in the domain modules.
 2. **One agent can have several surfaces.** Interactive Claude, Telegram, and
    voice should enter the same session and authorization model instead of becoming
@@ -97,7 +97,7 @@ The central product ideas are:
    external side effects, and significant state changes should be visible and
    auditable.
 6. **The public system starts with the new vocabulary.** Legacy MOL, M.O.T.,
-   ministry, and Upwork-specific names should not fossilize into Rheo Stream's
+   ministry, and Upwork-specific names should not fossilize into rheoStream's
    public APIs, packages, schemas, configuration, or documentation.
 7. **Sources and workflows vary independently.** A source describes where evidence
    came from; a workflow describes what a workspace does with it. Adding a funnel
@@ -113,7 +113,7 @@ The central product ideas are:
 
 ## Product vocabulary
 
-### Rheo Stream
+### rheoStream
 
 The name of the overall project, public open-source distribution, hosted service,
 and project hub. `rheo.stream` is already registered and should become the stable
@@ -132,9 +132,9 @@ Likely public endpoints, when they are needed, include:
 Individual module subdomains are unnecessary unless the modules later become
 independently deployed public services.
 
-### Rheo
+### rheo
 
-The agent that operates across the stream. Rheo is the conversational identity,
+The agent that operates across the stream. rheo is the conversational identity,
 not an additional system of record. It can search, summarize, propose, remember,
 and perform approved actions through tools exposed by the modules.
 
@@ -160,24 +160,24 @@ opportunity, an existing client engagement, or an independent commitment.
 
 The memory domain. It stores and retrieves durable context, relationships,
 decisions, observations, and history across the rest of the system. Recallatron
-should remain recognizable as the memory of Rheo Stream, while being capable of
+should remain recognizable as the memory of rheoStream, while being capable of
 serving other systems through a clean interface.
 
 ### Tuttle
 
 An optional external back-office integration, not a name to absorb or a codebase
 to silently fork. Tuttle covers adjacent business-administration concerns such as
-clients, contracts, time, invoices, taxes, and cash flow. Rheo Stream should be
+clients, contracts, time, invoices, taxes, and cash flow. rheoStream should be
 able to connect to it while respecting its local-first model and GPL-3.0 license.
 
 ## Legacy-to-new conceptual map
 
-| Existing asset | Rheo Stream destination | Migration posture |
+| Existing asset | rheoStream destination | Migration posture |
 | --- | --- | --- |
 | MOL opportunity intake, scoring, proposals, and answer library | Leads | Port useful behavior and tests into neutral domain contracts |
 | M.O.T. work and ticket management | Current | Reconstruct as the work-in-motion module |
 | Recallatron functionality currently inside M.O.T. | Recallatron | Extract behind an independent memory service boundary |
-| Rheo-bot and Claude routines | Rheo runtime and channels | Preserve useful behavior without preserving ad hoc coupling |
+| Rheo-bot and Claude routines | rheo runtime and channels | Preserve useful behavior without preserving ad hoc coupling |
 | Jobvis source adapters and patterns | Leads source integrations | Reuse or adapt selectively with MIT attribution and independent review |
 | Tuttle | External integration | Connect through supported interchange or a local node; contribute useful interoperability upstream |
 
@@ -188,7 +188,7 @@ repository boundaries or public naming.
 ## Who it is for
 
 The first client is a freelance web developer and software entrepreneur.
-Rheo Stream must improve that daily workflow while making the same foundation
+rheoStream must improve that daily workflow while making the same foundation
 available to other professions. The first configuration provides concrete needs
 against which to test the framework; it does not define every user's occupation.
 Related audiences include:
@@ -214,7 +214,7 @@ prohibitively expensive to add.
 ```text
   Claude · Telegram · Voice        Web UI       User-owned funnels / tools
               │                      │                     │
-      Rheo session/runtime     Application API      Connectors / intake API
+      rheo session/runtime     Application API      Connectors / intake API
               │                      │                     │
          MCP façade                 │                     │
               └──────────────────────┴─────────────────────┘
@@ -309,7 +309,7 @@ workspaces, even when one operator manages both.
 
 Start with declarative, schema-validated configuration and a small set of supported
 actions. Do not accept arbitrary executable scripts as a hosted workspace setting.
-Unusual mappings can run in a user-owned adapter outside Rheo Stream. New business
+Unusual mappings can run in a user-owned adapter outside rheoStream. New business
 behavior can be implemented as a trusted, versioned module through the extension
 contract. Arbitrary tenant-uploaded code needs a separate isolation design and is
 not an initial hosted capability.
@@ -320,7 +320,7 @@ not need to configure or see them. Disabling a capability stops its workers and
 new actions while retaining existing records for inspection and export.
 
 The capability registry reports enabled modules, available actions, required
-permissions, configuration versions, and connection health. Rheo and the UI use it
+permissions, configuration versions, and connection health. rheo and the UI use it
 to present relevant operations. Discovery does not grant permission: every call
 is checked again by the service, including a cached tool call after disablement.
 
@@ -385,9 +385,9 @@ and event checkpoints explicitly so reinstallation cannot cause duplicate sends.
 Host-level package removal is a separate operation and must account for every
 workspace that still uses that package.
 
-## Rheo: agent and interaction model
+## rheo: agent and interaction model
 
-Rheo's AI execution must be configurable through replaceable runtime adapters.
+rheo's AI execution must be configurable through replaceable runtime adapters.
 **Claude Code in print mode (`claude -p`) and OpenRouter API execution are explicit
 requirements. Codex CLI is an additional target adapter:** its documented headless
 interface makes it technically feasible, with integration and workflow suitability
@@ -409,12 +409,12 @@ supports `-p` with `--output-format json` or `--output-format stream-json`; stre
 uses `--verbose`. [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode)
 uses `codex exec`, with `--json` for JSONL events, `--output-schema` for a structured
 final response, and `codex exec resume <SESSION_ID>` to continue a specific session.
-These are existing CLI capabilities, not implemented Rheo Stream adapters.
+These are existing CLI capabilities, not implemented rheoStream adapters.
 
 OpenRouter supplies model inference and tool-call requests. Its
 [tool-calling flow](https://openrouter.ai/docs/guides/features/tool-calling) leaves
 tool execution with the client. The proposed adapter must therefore manage the
-agent loop and dispatch through Rheo's authorized MCP/domain boundary. Changing
+agent loop and dispatch through rheo's authorized MCP/domain boundary. Changing
 an API base URL alone is not a complete replacement for either CLI agent.
 
 ### Runtime configuration and portability
@@ -457,7 +457,7 @@ execution, and explicit configuration for tools, hooks, plugins, environment, an
 private session storage. Pass task content as data, never interpolated shell code.
 Use a scoped working directory and constrained filesystem/network access; opening
 the parent development workspace must not expose every private sibling to a run.
-Built-in shell/file tools must not bypass Rheo's authorization or write its domain
+Built-in shell/file tools must not bypass rheo's authorization or write its domain
 database directly. If an adapter cannot enforce a workflow's required boundary,
 that adapter is unsupported for that workflow. Headless execution must surface a
 denied or approval-required action without hanging or silently granting permission.
@@ -469,7 +469,7 @@ use an API or supported agent SDK with service-owned credentials; it must not de
 on customers sharing consumer CLI subscription logins. The first production default
 and rollout order remain open; the architecture must accommodate these choices.
 
-The runtime owns model conversation mechanics. Rheo Stream owns identity,
+The runtime owns model conversation mechanics. rheoStream owns identity,
 authorization, tool policy, domain data, audit history, and durable work state.
 
 Channels share identity and policy services, not automatically the same transcript
@@ -480,16 +480,16 @@ Revocation must also apply to queued work and resumed sessions.
 
 ### Interaction surfaces
 
-**Interactive Claude** is the shortest path to a useful first agent. Rheo's MCP
+**Interactive Claude** is the shortest path to a useful first agent. rheo's MCP
 server supplies the tools while Claude supplies the conversational environment.
 
 **Telegram** provides asynchronous, mobile access. It should be another client of
-the same Rheo session layer, not a second implementation of business rules.
+the same rheo session layer, not a second implementation of business rules.
 
 **Direct voice** adds speech recognition and synthesis around that same session:
 
 ```text
-speech → transcription → Rheo session → MCP/domain action → response → speech
+speech → transcription → rheo session → MCP/domain action → response → speech
 ```
 
 The voice provider should not become an independent reasoning agent with its own
@@ -498,7 +498,7 @@ share permissions, memory, confirmations, and action history.
 
 ## MCP as the stable agent boundary
 
-Rheo Stream should initially present one coherent MCP façade with namespaced,
+rheoStream should initially present one coherent MCP façade with namespaced,
 goal-level tools. Domain services sit behind it. The MCP layer must not expose raw
 database access or merely reproduce every CRUD endpoint.
 
@@ -620,7 +620,7 @@ The baseline integration should be a documented, authenticated ingestion API wit
 a generic webhook receiver and declarative field mapping. Add CSV/JSON import,
 manual capture, email ingestion, and incremental API polling as adapters. Users
 can connect a custom site or automation tool without contributing a provider to
-the core repository or adopting Rheo Stream as their form builder.
+the core repository or adopting rheoStream as their form builder.
 
 A connection maps source events to normalized observations and explicit routing
 rules. It declares supported event types, source identity, field mappings, schema
@@ -758,7 +758,7 @@ Collect and export only the fields needed for an authorized purpose. Deletion an
 correction must reach derived summaries, search indexes, queued actions, and local
 exports under the retention policy. Retain only the minimum permitted suppression
 and audit metadata needed to prevent re-import or repeated contact. External copies
-need a tracked correction/deletion request where supported; Rheo must not claim it
+need a tracked correction/deletion request where supported; rheo must not claim it
 can erase another system's copy automatically.
 
 ### Optional job-search source landscape
@@ -884,7 +884,7 @@ as the authoritative data model in the first release.
 ## Recallatron
 
 Recallatron is durable memory rather than an unbounded transcript archive. It
-should help Rheo retrieve the smallest useful context for the present task and
+should help rheo retrieve the smallest useful context for the present task and
 retain knowledge that remains valuable across sessions.
 
 Its concerns can include:
@@ -911,18 +911,18 @@ the source record. Memory retention must be explicit, not automatically permanen
 
 Tuttle is a promising adjacent component because it already addresses much of the
 administrative lifecycle that follows winning work. The preferred strategy is to
-connect to it rather than transplant its GPL code into Rheo Stream.
+connect to it rather than transplant its GPL code into rheoStream.
 
 Useful integration paths, from least to most coupled, include:
 
 1. structured export and import;
 2. a documented local API or command interface;
 3. a small local `rheo-node` that makes authenticated outbound connections and
-   exposes approved Tuttle operations to a remote Rheo session.
+   exposes approved Tuttle operations to a remote rheo session.
 
 A first upstream contribution to Tuttle could improve structured CSV/JSON or
 accounting export. That is useful to Tuttle independently and creates a legitimate
-interoperability boundary for Rheo Stream.
+interoperability boundary for rheoStream.
 
 Tuttle currently uses a local SQLite database per user through SQLModel/SQLAlchemy,
 with Alembic migrations. SQLite itself does not prevent a future hosted or
@@ -1002,7 +1002,7 @@ state separately and must leave tracked source and public defaults unchanged.
 
 ### Per-workspace SQLite is a serious option
 
-A hosted Rheo Stream could give each workspace its own SQLite database. This is a
+A hosted rheoStream could give each workspace its own SQLite database. This is a
 form of multitenancy with physical data separation rather than row-level security.
 It offers attractive properties:
 
@@ -1073,7 +1073,7 @@ and identity design; they are not part of the initial portability promise.
 
 ## Deployment modes
 
-Rheo Stream should be able to grow toward three related modes.
+rheoStream should be able to grow toward three related modes.
 
 ### Self-hosted
 
@@ -1102,13 +1102,13 @@ capabilities. This is likely the most natural hosted relationship with Tuttle.
 
 ### Fully hosted
 
-Rheo Stream operates the application, agent runtime, sources, and storage for the
+rheoStream operates the application, agent runtime, sources, and storage for the
 customer. The hosted service uses service-grade model credentials and strong
 workspace isolation. It should use the same domain contracts and MCP semantics as
 the self-hosted edition rather than becoming a separate product.
 
 Not every integration must be available in every mode. Capability discovery
-should make absence explicit to Rheo and to the user.
+should make absence explicit to rheo and to the user.
 
 ## Open-source and SaaS posture
 
@@ -1235,13 +1235,13 @@ If credentials are accidentally exposed, revoke/rotate them and handle repositor
 cleanup as a separate incident; adding an ignore rule afterward is insufficient.
 [GitHub's sensitive-data removal guidance](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository).
 
-These are requirements for the new public Rheo Stream repository. This idea document
+These are requirements for the new public rheoStream repository. This idea document
 does not establish that the current private legacy repository or its history is
 safe to publish.
 
 ### License choice
 
-The Rheo Stream license is still open. The principal choices include:
+The rheoStream license is still open. The principal choices include:
 
 - **AGPL-3.0** to require operators distributing or hosting modified versions to
   provide corresponding source;
@@ -1294,7 +1294,7 @@ purpose is to preserve future options.
     or general tool arguments.
 15. **Self-hosted is continuously exercised.** Hosted-only assumptions should not
     accumulate unnoticed while the project still claims portability.
-16. **Tuttle remains independently replaceable.** Rheo Stream depends on an
+16. **Tuttle remains independently replaceable.** rheoStream depends on an
     integration contract, not on Tuttle's private schema or process internals.
 17. **Funnels do not define the core schema.** Source mappings, pipeline presets,
     and domain modules are separate extension points. Job search is optional.
@@ -1319,9 +1319,9 @@ purpose is to preserve future options.
     tracked-file checks, and release-content review also protect the explicit
     checkout-local fallback and packaging paths.
 
-## What Rheo Stream is not trying to be
+## What rheoStream is not trying to be
 
-At this stage, Rheo Stream is not:
+At this stage, rheoStream is not:
 
 - an uncontrolled agent that automatically applies for jobs or contacts people;
 - a replacement for a complete accounting or tax product;
@@ -1482,7 +1482,7 @@ claim that the current applications implement the architecture:
 | Removal from one workspace | Other workspaces keep their module and jobs; shared host code is retained while still needed |
 | Module reinstalled or upgraded | Versioned data/configuration restore under compatible contracts without repeating completed external actions |
 | Two different custom funnels | An assessment and an event referral use independent mappings and the same core; neither requires product names or provider-specific columns in it |
-| Intake without a model session | A valid webhook is durably accepted and processed while Rheo is offline |
+| Intake without a model session | A valid webhook is durably accepted and processed while rheo is offline |
 | Same event retried concurrently | One observation and one processing effect; conflicting content under the same source event ID is surfaced |
 | One person, several interactions | A download and consultation request remain distinct observations; a party can be linked without automatically merging or duplicating opportunities |
 | Late evidence or scoring result | Newer facts, explicit corrections, and user-owned state survive; stale derived results are identified |
@@ -1504,9 +1504,9 @@ professions or every listed connector and deployment mode.
 
 ## Idea-stage success criterion
 
-The direction is working when it is credible that one person can install Rheo
+The direction is working when it is credible that one person can install rheo
 Stream, connect their own funnels or selected opportunity sources, choose a useful
-pipeline, speak or type to Rheo, and develop opportunities while retaining ownership
+pipeline, speak or type to rheo, and develop opportunities while retaining ownership
 of their data. They can optionally move chosen work into Current, retrieve permitted
 context from Recallatron, or connect an external CRM or Tuttle.
 
@@ -1525,7 +1525,7 @@ That first configuration's public version must be a reusable, synthetic example.
 The real client's profiles, credentials, and work remain private, under the same
 storage and publication rules that apply to every later user.
 
-The same contracts should allow a managed Rheo Stream service to provide that
+The same contracts should allow a managed rheoStream service to provide that
 experience to isolated workspaces without rewriting the domains or depending on
 consumer CLI subscriptions. Contributors should be able to understand where a new
 source, channel, tool, or integration belongs without learning legacy product
@@ -1535,8 +1535,8 @@ history.
 
 ### Settled direction
 
-- The umbrella name is **Rheo Stream** and the project domain is `rheo.stream`.
-- The agent is **Rheo**.
+- The umbrella name is **rheoStream** and the project domain is `rheo.stream`.
+- The agent is **rheo**.
 - Opportunity discovery and qualification is **Leads**.
 - Work in motion is **Current**.
 - Durable memory is **Recallatron**.
@@ -1695,7 +1695,7 @@ Three reversals are recorded here.
 
 ### Preferred but still to validate
 
-- One goal-oriented Rheo MCP façade is the initial agent boundary.
+- One goal-oriented rheo MCP façade is the initial agent boundary.
 - `claude -p` is a useful first local adapter. An OpenRouter adapter supplies its
   own agent loop; an API/agent SDK is appropriate for hosted operation. Validate
   Codex's headless adapter through the common runtime contract. The rollout order
@@ -1706,7 +1706,7 @@ Three reversals are recorded here.
   compatibility. It is not a first-release option: the first release settled on
   Postgres and made per-workspace SQLite a contract goal, with no implementation
   shipping.
-- A hybrid local-node design is the likely bridge between hosted Rheo sessions and
+- A hybrid local-node design is the likely bridge between hosted rheo sessions and
   local Tuttle data.
 - A clean modular monolith is a better beginning than premature microservices.
 - A small framework core supports connectors, versioned workflow presets, domain
@@ -1748,7 +1748,7 @@ Three reversals are recorded here.
 - The contact-purpose and retention contracts beyond the first release, and the
   external correction flow. Pipeline configuration limits and version migration
   are settled by the architecture specification above; identity resolution rules
-  and data ownership between Rheo Stream and an external CRM are settled by the
+  and data ownership between rheoStream and an external CRM are settled by the
   requirements.
 - Reusable-pack export rules and the packaging-allowlist detail. Private storage
   paths, configuration precedence, and the secret store are settled by the

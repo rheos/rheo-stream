@@ -68,7 +68,7 @@ escapes; an incoming event, model argument, or tenant setting cannot select a ho
 directory. Credentials belong in the selected secret store, not in this map.
 
 The editor workspace root is a filesystem convenience. It is not an authenticated
-Rheo Stream workspace and does not replace workspace or member authorization. A
+rheoStream workspace and does not replace workspace or member authorization. A
 single `workspaces/` data root may eventually contain several isolated application
 workspaces managed by the host. Avoid deriving authorization from folder names.
 

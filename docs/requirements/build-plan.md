@@ -1,4 +1,4 @@
-# Rheo Stream — phased build plan
+# rheoStream — phased build plan
 
 **Status:** Accepted. Ratified by the maintainer's review and merge of the pull request that
 carried these documents (PR #5, 2026-09-09). Phases one to three are planned to implementable
@@ -338,7 +338,7 @@ predecessor. This phase proves module contract v1 on the smallest domain that ca
 **Goal.** The first real funnel works end to end. An inbound inquiry from a site the maintainer
 already operates arrives, becomes an observation with provenance, resolves a party, creates an
 opportunity in a configured pipeline, and is worked to a terminal disposition in the web
-interface and through Rheo. This phase completes release one.
+interface and through rheo. This phase completes release one.
 
 **In scope**
 

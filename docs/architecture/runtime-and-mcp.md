@@ -8,7 +8,7 @@ provider) and the capability-check half of question 10.
 
 ## Runtime contract, version 1
 
-The runtime owns model conversation mechanics. Rheo Stream owns identity, authorization, tool
+The runtime owns model conversation mechanics. rheoStream owns identity, authorization, tool
 policy, domain data, audit, and durable work state (idea document). The contract is the seam
 between the two, in `packages/contracts.runtime`, and every domain service that wants a model
 depends on it and on nothing more specific (FR 19, guardrail 4).
