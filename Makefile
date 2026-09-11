@@ -67,11 +67,43 @@ migrate:
 # stray, pre-existing deployment.toml elsewhere cannot redirect the operator
 # sequence at a different cluster. Every step's failure is checked directly (`||`
 # / `if !`) so `set -e` can never make a FAIL line unreachable.
+#
+# Isolation means this target cannot COEXIST on the same host ports as a running
+# `make up` (or anything else already using them) — both would try to bind the
+# same host port, and Docker doesn't namespace host ports by compose project. A
+# preflight probes the three host ports this target needs before creating
+# anything, so that collision fails fast with a message naming the remedy
+# (`make down`, or override the port) instead of a raw "port is already
+# allocated" Docker error that sends a developer to debug networking instead of
+# stopping the shared stack. The preflight only reads (a TCP connect attempt via
+# bash's /dev/tcp); it never stops or removes anything itself.
 demo:
 	@set -e; \
 	demo_project="rheo-stream-demo"; \
+	pg_port="$${RHEO_PG_PORT:-5432}"; \
 	core_port="$${RHEO_CORE_PORT:-8000}"; \
 	web_port="$${RHEO_WEB_PORT:-3000}"; \
+	port_in_use() { \
+		(exec 3<>"/dev/tcp/127.0.0.1/$$1") 2>/dev/null; \
+		in_use_rc=$$?; \
+		exec 3>&- 2>/dev/null || true; \
+		exec 3<&- 2>/dev/null || true; \
+		return $$in_use_rc; \
+	}; \
+	preflight_failed=0; \
+	for portspec in "$$pg_port:postgres:RHEO_PG_PORT" "$$core_port:core:RHEO_CORE_PORT" "$$web_port:web:RHEO_WEB_PORT"; do \
+		p="$${portspec%%:*}"; \
+		rest="$${portspec#*:}"; \
+		label="$${rest%%:*}"; \
+		varname="$${rest#*:}"; \
+		if port_in_use "$$p"; then \
+			echo "FAIL  port $$p ($$label) is already in use — if that is this project's 'make up' dev stack, run 'make down' first; otherwise set $$varname to a free port"; \
+			preflight_failed=1; \
+		fi; \
+	done; \
+	if [ "$$preflight_failed" != 0 ]; then \
+		exit 1; \
+	fi; \
 	demo_data_root="$$(mktemp -d)"; \
 	WEB_PID=""; \
 	cleanup() { \
@@ -86,7 +118,7 @@ demo:
 		if docker compose -p "$$demo_project" -f deploy/compose.yaml exec -T postgres pg_isready -U rheo -d rheo >/dev/null 2>&1; then break; fi; \
 		sleep 1; \
 	done; \
-	demo_dsn="postgresql://rheo:rheo_dev_only@localhost:$${RHEO_PG_PORT:-5432}/postgres"; \
+	demo_dsn="postgresql://rheo:rheo_dev_only@localhost:$$pg_port/postgres"; \
 	echo "Running rheo migrate..."; \
 	RHEO_CLUSTER_DSN="$$demo_dsn" RHEO__storage__cluster_dsn_ref="secret://env/RHEO_CLUSTER_DSN" \
 		RHEO_PROFILE=development RHEO_DATA_ROOT="$$demo_data_root" uv run rheo migrate \
