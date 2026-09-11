@@ -30,7 +30,7 @@ All in the `leads` schema. Every table has `id uuid` (UUIDv7) unless noted.
 | `funnel` | `name text`, `description text`, `created_at`, `archived_at null` | Acquisition context: a site, an event, a referral programme. |
 | `campaign` | `funnel_id`, `name text`, `created_at`, `archived_at null` | Optional refinement of a funnel. |
 | `intake_connection` | `name`, `transport text`, `source_namespace text unique`, `mapping_id`, `mapping_version integer`, `funnel_id null`, `campaign_id null`, `priority integer`, `subject_authenticated boolean`, `email_verified boolean`, `signing_secret_ref text null`, `signing_key_generation integer`, `previous_secret_ref text null`, `previous_valid_until timestamptz null`, `state text`, `created_at`, `revoked_at null` | `transport` in `webhook`, `import`, `manual`. `state` in `active`, `needs_credential`, `revoked`. `source_namespace` is a URI (`urn:rheo:connection:<uuid>`) used as the CloudEvents `source`. `funnel_id` is null only on the `manual` connection, where each capture names its funnel (check constraint). `subject_authenticated` and `email_verified` are the operator's declaration of what this source proves, which R4 needs. `signing_key_generation` starts at 1 and increments on every rotation; it is the only rotation mechanism (see [transports](#transports)). |
-| `connection_health` | `connection_id pk`, `last_accepted_at`, `last_processed_at`, `pending_count`, `unresolved_failures integer`, `last_error text null`, `lag_seconds integer` | Maintained by the intake worker; read by `leads.connection.health` (FR 38). |
+| `connection_health` | `connection_id pk`, `last_accepted_at`, `last_processed_at`, `pending_count`, `unresolved_failures integer`, `last_error text null`, `last_error_at timestamptz null`, `last_unauthenticated_write_at timestamptz null`, `lag_seconds integer` | Maintained by the intake worker; read by `leads.connection.health` (FR 38). `last_error_at` is set by every path that records a failure. `last_unauthenticated_write_at` is written by the webhook receiver alone and is what bounds its pre-authentication write ([transports](#transports)); it is a separate column precisely so an authenticated path's write can never suppress the receiver's, which criterion 42 requires to be visible. |
 | `field_mapping` | `id`, `version integer`, `name`, `source_kind text`, `state text` | `source_kind` in `json`, `csv`. Primary key `(id, version)`. Versions are immutable once a receipt pins them. |
 | `field_mapping_identity` | `mapping_id`, `version`, `event_id_path`, `occurred_at_path`, `subject_id_path null`, `verified_email_path null` | Where identity lives in a payload. Paths are JSON Pointers for JSON, column names for CSV. |
 | `field_mapping_rule` | `mapping_id`, `version`, `target text`, `source_path text`, `transform text null`, `transform_arg text null`, `required boolean`, `clear_on_null boolean` | `target` is a core fact name or `ext.<namespace>.<field>`. `transform` from a closed set: `trim`, `lower`, `email_normalize`, `phone_normalize`, `datetime(format)`, `const(value)`. |
@@ -206,10 +206,48 @@ steps in this order, and stops at the first that fails:
    `accept_delivery`.
 
 The failure count is the one Leads write that happens before a context exists: the route handler
-increments `connection_health.unresolved_failures` and sets `last_error` in its own short
-transaction, keyed by the path id, because an unauthenticated request has no actor to dispatch
-for, and criterion 42 wants the refusal visible on that connection's health. The connection id in
-the path is a lookup key, not authorization; the signature is.
+increments `connection_health.unresolved_failures` and sets `last_error` and `last_error_at` in
+its own short transaction, keyed by the path id, because an unauthenticated request has no actor
+to dispatch for, and criterion 42 wants the refusal visible on that connection's health. The
+connection id in the path is a lookup key, not authorization; the signature is.
+
+**That write is debounced, because it is reachable without authentication.** The connection id is
+a path segment and is explicitly not a credential, so anyone who has seen a webhook URL can drive
+this handler, and a per-request write would make a bad-signature flood into unbounded write
+amplification and row-lock contention on one primary key. The handler therefore issues the update
+only when `last_unauthenticated_write_at` is null or older than
+`intake.health_write_interval_seconds` (package default 60, operator floor `min`), as a single
+conditional statement:
+
+```sql
+UPDATE leads.connection_health
+SET unresolved_failures = unresolved_failures + 1,
+    last_error = $2, last_error_at = now(), last_unauthenticated_write_at = now()
+WHERE connection_id = $1
+  AND (last_unauthenticated_write_at IS NULL
+       OR last_unauthenticated_write_at < now() - $3::interval);
+```
+
+One statement, no read-then-write, so concurrent refusals collapse onto the row lock and past the
+first each does nothing.
+
+**The debounce is keyed on its own column, and that is load-bearing.** Criterion 42's test
+produces two refusals for one connection in quick succession: a processing-time refusal in the
+worker (which has a context and writes through the ordinary path) and a receiver-time refusal on
+the next delivery signed with the old secret. If both paths shared one timestamp, the worker's
+write would suppress the receiver's and the second refusal would not be visible, failing the
+criterion. Only the receiver writes `last_unauthenticated_write_at`, so an authenticated path can
+never consume the receiver's budget, and both refusals land in `unresolved_failures` as the
+criterion requires.
+
+What is deliberately given up is an exact count of *unauthenticated* refusals: a flood registers
+as one increment per interval rather than one per request. An exact count of requests an attacker
+controls is a number the deployment should not pay to keep, and a caller that wants the request
+rate reads the proxy's logs, which is where unauthenticated traffic belongs.
+
+The same budget covers the state-check refusal in step 1 and the timestamp refusal in step 2,
+since all three are pre-authentication. A refusal that gets past the signature happens inside
+`accept_delivery` under a real context and is written by the ordinary audited path, not here.
 
 **Rotation and revocation** are connection-level and there is no other mechanism.
 `leads.connection.rotate_secret(connection_ref, overlap_seconds)` (mutate, owner) generates a
