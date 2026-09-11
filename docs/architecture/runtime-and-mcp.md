@@ -67,8 +67,9 @@ The adapter yields `RuntimeEvent`s and ends with exactly one terminal event:
 | `cancelled` | | Terminal. |
 | `approval_required` | `approval_id` | Terminal for this run: the run stops, the operation goes `approval_required`, and a later run resumes with `continuation` after approval. |
 
-Failure kinds, fixed: `executable_unavailable`, `credential_invalid`, `tool_denied`,
-`deadline_exceeded`, `stream_truncated`, `output_invalid`, `iteration_limit`, `runtime_error`.
+Failure kinds, fixed: `executable_unavailable`, `credential_invalid`, `credential_not_owned`,
+`tool_denied`, `deadline_exceeded`, `stream_truncated`, `output_invalid`, `iteration_limit`,
+`runtime_error`.
 The five criterion 16 induces are the first five. Each maps to an operation `failed` with the kind
 as `error_code`, within the deadline, with no `succeeded` possible: the operation's
 `terminal_check_kind` for a run is `handler_returned` only when a `final_output` was received, so
@@ -126,7 +127,7 @@ and uses that program's own agent loop.
 | Tools | The adapter writes a per-run MCP configuration file pointing at this deployment's MCP endpoint with the [run-scoped token](#the-run-scoped-token) the core handed it, and passes `permitted_tools` as the executable's allow list. The facade enforces the token's snapshot on every call, so the allow list is a convenience and the token is the boundary. |
 | Working directory | `<data_root>/workspaces/<id>/runs/<operation_id>/`, created empty, removed after the run. The parent development workspace is never the working directory. |
 | Configuration directory | `<data_root>/workspaces/<id>/runtime/claude-cli/`, passed as the executable's configuration-directory variable (`CLAUDE_CONFIG_DIR`) and as `HOME`, so that everything the executable writes by convention (its session files among them) lands under the data root and nowhere else. It is per workspace, not per run, because `continuation` resumes a native session from a later operation; a per-run directory would lose it. The retention sweep removes files in it older than `runtime.transcript_retention_days`. |
-| Credential and seeding | `runtime.claude_cli.credential_kind`, a deployment setting, is `login` or `api_key`; the package default is `login`, the personal self-host arrangement release one targets. With `login`, the operator completes the executable's interactive login once on the host into `runtime.claude_cli.login_seed_dir` (a directory under the data root, mode 0700), and the adapter **seeds** each workspace's configuration directory by copying that directory into it the first time the workspace runs; a missing or empty seed directory is `credential_invalid` at spawn, before any process starts. With `api_key`, the `model` credential slot maps to a secret reference in the adapter's private configuration, resolved through the adapter's secret scope and passed in the child environment as the executable's own credential variable, and the configuration directory is created empty. Either way nothing about the credential enters the request, the operation record, or the transcript (criterion 17). A hosted edition never uses `login` ([later phases](later-phases.md#phase-8-the-hosted-edition)). |
+| Credential and seeding | `runtime.claude_cli.credential_kind`, a deployment setting, is `login` or `api_key`; the package default is `login`, the personal self-host arrangement release one targets. With `login`, the operator completes the executable's interactive login once on the host into `runtime.claude_cli.login_seed_dir` (a directory under the data root, mode 0700), records whose login it is in `runtime.claude_cli.credential_account_id` ([below](#the-login-credential-is-bound-to-one-account)), and the adapter **seeds** each workspace's configuration directory by copying that directory into it the first time the workspace runs; a missing or empty seed directory is `credential_invalid` at spawn, before any process starts. With `api_key`, the `model` credential slot maps to a secret reference in the adapter's private configuration, resolved through the adapter's secret scope and passed in the child environment as the executable's own credential variable, and the configuration directory is created empty. Either way nothing about the credential enters the request, the operation record, or the transcript (criterion 17). A hosted edition never uses `login` ([later phases](later-phases.md#phase-8-the-hosted-edition)). |
 | Environment | An allowlist: locale, path, the two directory variables above, and, under `api_key`, the executable's credential variable. Nothing else from the host environment reaches the child. |
 | Capability vector | `tool_calling = true`, `structured_output = true` (the adapter validates the final output against the request's schema itself and fails `output_invalid`), `streaming = true`, `continuation = true`, `cancellation = true` (the process group is killed on the token), `usage_reporting = exact`, `isolation = advisory`. Criterion 15's gate runs against this vector: a request requiring `isolation = enforced` is the one release-one requirement it cannot meet. |
 | Isolation | Reports `advisory` in release one: the adapter constrains the working directory and the tool allow list but cannot enforce a filesystem or network sandbox on its own. Workflows requiring `enforced` are refused on it until an operator-provided sandbox is configured. |
@@ -137,6 +138,36 @@ and uses that program's own agent loop.
 
 The adapter never opens a database, never sees a `WorkspaceContext`, and never sees a secret
 reference outside its own configuration.
+
+### The `login` credential is bound to one account
+
+`credential_kind = login` seeds every workspace's configuration directory from one operator's
+interactive login. That credential is a **person's** subscription, not a service credential, and
+the deployment has no way to make it anything else. So the runtime binds it:
+
+- `runtime.claude_cli.credential_account_id` (deployment setting, required when
+  `credential_kind = login`) names the account whose login was seeded. A deployment that sets
+  `login` without it fails startup naming the setting, in the same pass that validates the seed
+  directory.
+- Before any process is spawned, the runtime compares the run's originating account — the account
+  behind `RuntimeRequest.actor`, which the [run-scoped token](#the-run-scoped-token) is already
+  issued to — with that setting. A mismatch is the terminal failure `credential_not_owned`, and
+  the operation `failed` with that code. No child process starts and nothing is written to the
+  seeded directory.
+- `credential_kind = api_key` carries no such binding, because a deployment-owned API credential
+  is a service credential and serving several members is what it is for.
+
+**Why this is a release-one rule and not a hosted-edition one.** R1 gives every workspace
+membership and roles from the first day, and `rheo member add` is the release-one path to a second
+member. Without the binding, that member's first run spawns the executable against the operator's
+personal subscription — one person's plan silently serving another person's usage, which is
+exactly the arrangement a personal subscription is not. The spec already said "a hosted edition
+never uses `login`"; the check is what makes the sentence true one member earlier than the hosted
+edition, where it is first *noticed* rather than first *true*.
+
+The consequence is deliberate and narrow: on a `login` deployment, a second member can use every
+surface except a model run, and the refusal names the reason. An operator who wants runs for
+everyone moves the deployment to `api_key`, which is one setting and a secret reference.
 
 ## The OpenRouter adapter (phase six, shape only)
 
