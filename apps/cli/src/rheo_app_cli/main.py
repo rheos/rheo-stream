@@ -31,7 +31,7 @@ Handler = Callable[[argparse.Namespace], int]
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rheo",
-        description="Rheo Stream operator command: the control plane, workspaces, "
+        description="rheoStream operator command: the control plane, workspaces, "
         "migrations and diagnostics.",
     )
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
