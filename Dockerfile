@@ -1,7 +1,11 @@
-# Shared Python core/worker image. The default command serves apps/core's
-# hello-world /healthz on 8000; a worker-mode command override is 0c's concern,
-# not 0a's. The build context is the checkout root (deploy/compose.yaml sets
-# `context: ..`), so the COPYs below are repo-root-relative.
+# Shared Python core/worker image. The default command serves apps/core's two
+# listeners: the public one (`/healthz`, `/auth/*`, the `api` surface) on 8000
+# and the internal one (container-network only) on 8100, both under one process
+# via `rheo_app_core.serve` (C10) — never `uvicorn ... --workers N`, which would
+# break the single-loop, shared-process design both listeners depend on. A
+# worker-mode command override is 0c's concern, not this run's. The build
+# context is the checkout root (deploy/compose.yaml sets `context: ..`), so the
+# COPYs below are repo-root-relative.
 FROM python:3.12-slim
 
 # Pin uv to an exact version (spec.md Technical Risks, risk 1: uv is the newer
@@ -43,4 +47,4 @@ RUN mkdir -p /var/lib/rheo-stream
 ENV RHEO_IN_CONTAINER=1
 
 EXPOSE 8000
-CMD ["uv", "run", "uvicorn", "rheo_app_core.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "python", "-m", "rheo_app_core.serve"]
