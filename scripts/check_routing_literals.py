@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+"""Routing-literal denylist scan of apps/web/src and apps/core/src (criterion 22, B10).
+
+`docs/architecture/identity-and-topology.md` § The routing configuration calls this
+"a lint failure in both codebases": every link, redirect, callback URL and MCP
+configuration file must go through `url_for`/`identity_path` (Python) or
+`urlFor`/`identityPath` (TypeScript) rather than spelling a host or a
+topology-specific prefix out directly. A route string is correct in exactly one of
+the two topologies (`path` or `subdomain`) and silently wrong in the other, which
+is why this is a static scan rather than a runtime assertion — a wrong hard-coded
+literal would still return 200 in whichever mode happened to match it.
+
+Runs under the system python3 (3.9-compatible, no third-party deps), mirroring
+`scripts/check_web_platform.py`. Scans exactly two roots — `apps/web/src/**`
+(`.ts`/`.tsx`) and `apps/core/src/**` (`.py`) — for a literal `http://`, `https://`,
+`/auth/`, `/api/`, or `/mcp` route string.
+
+Two allowlist mechanisms, not one, and they are deliberately different in kind:
+
+1. **Content allowlist** (the run's own family of route-literal owners): the
+   `apps/web/src/lib/routing/` package and `apps/core/src/rheo_app_core/
+   {auth_routes,api_routes}.py`. These are excluded whole-file, not line-by-line —
+   the routing package is where the literal is defined so `url_for`/`urlFor` has
+   something to return, and the two FastAPI modules attach the literal path to a
+   route *decorator* (`@router.get("/auth/login")`), which serves the path rather
+   than linking to it. Narrow on purpose: a wider content allowlist (e.g. all of
+   `apps/core/src/rheo_app_core/`) would let a real hard-coded link hide in the
+   next file added beside these two, which is the vacuous-gate failure mode this
+   script exists to avoid.
+2. **Structural exclusion** (`*.test.ts`/`*.test.tsx`/`*.spec.ts`/`*.spec.tsx`):
+   test files legitimately hard-code fixture URLs to pin what the routing
+   functions under test *produce* — that is what a test is for, and scanning test
+   fixtures for the same rule the implementation is tested against would make
+   every test file its own permanent allowlist entry in practice. This mirrors
+   `check_web_platform.py`'s `SKIP_DIRS` in spirit (both exclude something that is
+   not "application code producing a link"), even though the mechanism here is a
+   filename suffix rather than a directory.
+
+A third piece keeps both scans honest without either allowlist mechanism becoming
+a place to hide a real link: comments, JSDoc, and Python docstrings are stripped
+(quote-aware, so an actual code string that happens to *start* with "http://" is
+never mistaken for a `//` comment) before the pattern is matched. Without this,
+ordinary prose — "see `/auth/continue`" in a comment, or this module's own
+docstring — would fail the gate on documentation, which is a different and much
+noisier failure mode than the one this scan is for.
+
+Self-test (anti-vacuity, `spec.md` Technical Risk 10 / criterion 22): `main()`
+always plants a literal in a scratch tree and re-runs `check()` against it before
+scanning the real tree, so a scan that stopped being able to catch anything (a
+broken regex, an allowlist that grew too wide) fails loudly on every invocation
+rather than silently passing forever.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import sys
+import tempfile
+from collections.abc import Iterator
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+WEB_ROOT = ROOT / "apps" / "web" / "src"
+CORE_ROOT = ROOT / "apps" / "core" / "src"
+
+TS_SUFFIXES = frozenset({".ts", ".tsx"})
+PY_SUFFIXES = frozenset({".py"})
+
+# Structural exclusion (see module docstring, point 2): file-suffix based, not
+# content-based, and applied only on the web side, where tests live beside the
+# code they test. Python tests for this run live under the top-level tests/,
+# which is outside both scanned roots already.
+_TEST_SUFFIXES = ("test.ts", "test.tsx", "spec.ts", "spec.tsx")
+
+# Generated/vendored dirs a walk of a src/ root should never meet in this repo,
+# kept anyway so this scan degrades the same way check_web_platform.py's does if
+# one ever appears (e.g. a stray __pycache__ from a local interpreter run).
+_SKIP_DIRS = frozenset({"__pycache__", "node_modules", ".next"})
+
+# Content allowlist (see module docstring, point 1): whole files, not lines within
+# them — deliberately not "any file under rheo_app_core" or "any file under
+# lib/", which would silently cover a future file that has no business holding a
+# route literal.
+_ALLOWLISTED_DIRS = (WEB_ROOT / "lib" / "routing",)
+_ALLOWLISTED_FILES = frozenset(
+    {
+        CORE_ROOT / "rheo_app_core" / "auth_routes.py",
+        CORE_ROOT / "rheo_app_core" / "api_routes.py",
+    }
+)
+
+# http(s):// as a scheme prefix; /auth/, /api/ as path prefixes; /mcp with no
+# trailing slash required (the mcp surface's own path is exactly "/mcp", per
+# RoutingConfig's package defaults — a trailing-slash requirement would miss it).
+_LITERAL = re.compile(r"https?://|/auth/|/api/|/mcp")
+
+
+def _is_test_file(path: Path) -> bool:
+    return any(path.name.endswith(suffix) for suffix in _TEST_SUFFIXES)
+
+
+def _is_allowlisted(path: Path) -> bool:
+    if path in _ALLOWLISTED_FILES:
+        return True
+    for directory in _ALLOWLISTED_DIRS:
+        try:
+            path.relative_to(directory)
+        except ValueError:
+            continue
+        return True
+    return False
+
+
+def _strip_ts_comments(text: str) -> str:
+    """Blank `//` and `/* */` comments (JSDoc included), preserving every string
+    and template literal's own content untouched and every newline in place (so a
+    caller that wanted line numbers could still recover them; this scan does not).
+
+    Quote-aware by construction: the scan walks the text once, tracking whether it
+    is inside a string/template literal, and only treats `//`/`/*` as a comment
+    start outside one. Without this, a real code literal like `"http://evil"`
+    would have its own `//` mistaken for a line-comment start and the rest of the
+    string silently dropped from the scan — hiding exactly the thing this script
+    exists to catch, which would be a worse failure than the false positives this
+    function exists to avoid.
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        pair = text[i : i + 2]
+        if pair == "//":
+            end = text.find("\n", i)
+            end = n if end == -1 else end
+            out.append(" " * (end - i))
+            i = end
+            continue
+        if pair == "/*":
+            close = text.find("*/", i + 2)
+            end = n if close == -1 else close + 2
+            out.append("".join("\n" if ch == "\n" else " " for ch in text[i:end]))
+            i = end
+            continue
+        char = text[i]
+        if char in "\"'`":
+            quote = char
+            j = i + 1
+            while j < n:
+                if text[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                if text[j] == quote:
+                    j += 1
+                    break
+                if text[j] == "\n" and quote != "`":
+                    # Unterminated single/double-quoted literal (invalid TS) —
+                    # stop the string here rather than running off the line.
+                    break
+                j += 1
+            out.append(text[i:j])
+            i = j
+            continue
+        out.append(char)
+        i += 1
+    return "".join(out)
+
+
+def _strip_py_prose(text: str) -> str:
+    """Blank `#` comments and triple-quoted strings (this codebase's own
+    docstring convention; see every module in `apps/core/src` for the pattern),
+    quote-aware for the same reason `_strip_ts_comments` is.
+
+    Every route literal this repo's Python side ever needs is a plain single- or
+    double-quoted string (route decorators, `url_for` calls) — never triple-quoted
+    — so treating a triple-quoted string as prose rather than code is a
+    convention this scan relies on, not a guess; a triple-quoted string used as an
+    actual route literal would be invisible to this scan, which is a real (if
+    currently theoretical) limitation, named here rather than left implicit.
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] == "#":
+            end = text.find("\n", i)
+            end = n if end == -1 else end
+            out.append(" " * (end - i))
+            i = end
+            continue
+        triple = text[i : i + 3]
+        if triple in ('"""', "'''"):
+            close = text.find(triple, i + 3)
+            end = n if close == -1 else close + 3
+            out.append("".join("\n" if ch == "\n" else " " for ch in text[i:end]))
+            i = end
+            continue
+        char = text[i]
+        if char in "\"'":
+            quote = char
+            j = i + 1
+            while j < n:
+                if text[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                if text[j] == quote:
+                    j += 1
+                    break
+                if text[j] == "\n":
+                    break
+                j += 1
+            out.append(text[i:j])
+            i = j
+            continue
+        out.append(char)
+        i += 1
+    return "".join(out)
+
+
+def _iter_files(root: Path, suffixes: frozenset[str]) -> Iterator[Path]:
+    if not root.is_dir():
+        return
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+        for name in filenames:
+            path = Path(dirpath) / name
+            if path.suffix in suffixes:
+                yield path
+
+
+def _relative(path: Path) -> str:
+    try:
+        return path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def check(*, web_root: Path = WEB_ROOT, core_root: Path = CORE_ROOT) -> list[str]:
+    errors: list[str] = []
+    for path in sorted(_iter_files(web_root, TS_SUFFIXES)):
+        if _is_allowlisted(path) or _is_test_file(path):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        if _LITERAL.search(_strip_ts_comments(text)):
+            errors.append(f"Hard-coded route literal: {_relative(path)}")
+    for path in sorted(_iter_files(core_root, PY_SUFFIXES)):
+        if _is_allowlisted(path):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        if _LITERAL.search(_strip_py_prose(text)):
+            errors.append(f"Hard-coded route literal: {_relative(path)}")
+    return errors
+
+
+def _self_test() -> str | None:
+    """Plant a literal outside every allowlist and confirm `check()` catches it.
+
+    Returns `None` on success, or a diagnostic string naming the failure. Runs
+    against a scratch directory tree, never the real repo, so it proves the
+    scan's mechanism (pattern, comment-stripping, allowlist logic) without ever
+    depending on — or risking corrupting — a tracked file.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        web_root = tmp_path / "web-src"
+        core_root = tmp_path / "core-src"
+        (web_root / "components").mkdir(parents=True)
+        core_root.mkdir(parents=True)
+        planted = web_root / "components" / "planted.tsx"
+        planted.write_text(
+            'export const plantedHref = "/api/v1/planted"; // not allowlisted\n'
+        )
+        # A comment-only occurrence must NOT be flagged — proves the stripper
+        # does not just make the scan more trigger-happy than the real gate is.
+        quiet = web_root / "components" / "quiet.tsx"
+        quiet.write_text("// mentions /api/ only in prose, never in code\n")
+        findings = check(web_root=web_root, core_root=core_root)
+        planted_hit = any("planted.tsx" in finding for finding in findings)
+        quiet_hit = any("quiet.tsx" in finding for finding in findings)
+        if not planted_hit:
+            return "self-test FAILED: a planted literal went uncaught"
+        if quiet_hit:
+            return "self-test FAILED: comment-only text was flagged (stripper broke)"
+        return None
+
+
+def main() -> int:
+    self_test_failure = _self_test()
+    if self_test_failure is not None:
+        print(self_test_failure, file=sys.stderr)
+        return 1
+    try:
+        findings = check()
+    except (OSError, RuntimeError, UnicodeError, ValueError) as error:
+        print(f"Routing literal check failed: {error}", file=sys.stderr)
+        return 1
+    for finding in findings:
+        print(finding, file=sys.stderr)
+    if not findings:
+        print(
+            "Routing literal checks passed (self-test verified the scan still "
+            "catches a planted literal): no hard-coded route string outside "
+            "apps/web/src/lib/routing/ or the two FastAPI route modules."
+        )
+    return 1 if findings else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

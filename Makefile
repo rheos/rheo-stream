@@ -26,6 +26,7 @@ lint:
 	uv run ruff check .
 	uv run ruff format --check .
 	pnpm -C apps/web lint
+	python3 scripts/check_routing_literals.py
 
 typecheck:
 	uv run mypy

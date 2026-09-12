@@ -86,8 +86,19 @@ jobs:
         run: pnpm -C apps/web exec tsc --noEmit
       - name: Build
         run: pnpm -C apps/web build
-      - name: Vitest (core-health fail-soft seam)
+      - name: Vitest (path mode)
         run: pnpm -C apps/web test
+        env:
+          RHEO_ROUTING_MODE: path
+      - name: Vitest (subdomain mode)
+        run: pnpm -C apps/web test
+        env:
+          RHEO_ROUTING_MODE: subdomain
       # After `next build`, so .next/ exists — proves the scan skips generated output.
       - name: Web platform-only gate (criterion 23)
         run: python3 scripts/check_web_platform.py
+      # Needs .next/ for the same reason as the platform gate above: the scan's
+      # apps/web/src/** root is unaffected, but running after build keeps this
+      # step beside its sibling gate rather than ahead of a fresher tree state.
+      - name: Routing-literal gate (criterion 22)
+        run: python3 scripts/check_routing_literals.py

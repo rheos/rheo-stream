@@ -1,5 +1,12 @@
 # Repository tooling
 
+`python3 scripts/check_routing_literals.py` fails on a hard-coded route literal
+(`http(s)://`, `/auth/`, `/api/`, `/mcp`) anywhere under `apps/web/src` or
+`apps/core/src` outside `apps/web/src/lib/routing/` and the two FastAPI route
+modules that serve those paths — every link must go through `url_for`/`urlFor`
+instead. Self-tests itself on every run (plants a literal, confirms it is caught)
+before scanning the real tree.
+
 Run `python3 scripts/check_repository.py` from any directory in a checkout.
 Git and Python 3.9 or newer are the only dependencies.
 
