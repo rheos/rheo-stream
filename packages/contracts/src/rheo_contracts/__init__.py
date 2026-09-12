@@ -26,6 +26,7 @@ from rheo_contracts.manifest import (
     AuditSpec,
     Idempotency,
     OperationDeclaration,
+    ToolDeclaration,
 )
 from rheo_contracts.refs import (
     RESERVED_MODULE_SEGMENT,
@@ -55,6 +56,7 @@ __all__ = [
     "RecordRefMalformed",
     "Role",
     "SafetyClass",
+    "ToolDeclaration",
     "WorkspaceContext",
     "is_reserved_module",
 ]

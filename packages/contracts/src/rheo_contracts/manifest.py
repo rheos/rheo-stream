@@ -4,9 +4,10 @@ Source of truth: ``docs/architecture/module-contract.md`` § Operations, tools, 
 
 Not here, and deliberately:
 
-- ``ToolDeclaration`` arrives in C8 (run 0b2), with the MCP facade that reads it. A tool
-  type with no reader is a shape guessed a run early.
 - ``ModuleManifest`` itself is phase 2, together with module install/enable lifecycle.
+
+``ToolDeclaration`` arrives here in C8 (run 0b2), with the MCP facade
+(``apps/mcp/src/rheo_app_mcp/tools.py``) as its first reader.
 """
 
 from enum import StrEnum
@@ -110,3 +111,32 @@ class OperationDeclaration(BaseModel):
     arrives with 0c2's registration assertions (criterion 14). The 0b1 registry
     stores the declaration and does not check this field.
     """
+
+
+class ToolDeclaration(BaseModel):
+    """What a module tells the MCP facade about one callable tool (C8, run 0b2).
+
+    Minimal by design: only the fields ``apps/mcp/src/rheo_app_mcp/tools.py``
+    actually reads. Guards, streamed output shape and long-running semantics are
+    not declared here — they belong to the transport work in 0c3, and a field
+    with no reader this run is a shape guessed a run early, the same reasoning
+    that kept this type out of C1.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    """The tool's own name, as a caller of ``call_tool`` names it — distinct
+    from ``operation``, which is the registry operation it dispatches to."""
+
+    operation: str
+    """The registered operation name this tool calls (``dispatch(ctx, operation,
+    arguments)``); not itself validated against the registry at declaration
+    time — a declared tool naming an operation that never registers is simply
+    absent from ``rheo_core.tokens.sets.agent_default``'s live intersection."""
+
+    input_model: type[BaseModel]
+    """Not used to validate a call in this run: the operation's own declared
+    input model is what ``dispatch`` validates against. Carried here for the
+    façade's own tool-listing metadata, and for a future transport to describe
+    the tool's shape to a client."""
