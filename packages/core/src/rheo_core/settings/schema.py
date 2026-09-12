@@ -14,11 +14,12 @@ production keys and the identity check would fail if it held more. So every
 registration carries its default, and for the production keys the registry default and
 the TOML value are the same value in two places, which the identity check also asserts.
 
-This chunk (C2, run 0b1) declares exactly eight production keys. ``routing.*`` (C6),
-the remaining ``identity.*`` and ``internal.secret_ref`` (C7), ``api.cors_origins`` and
-``modules.installed`` (the runs that read them) are not declared here: a key with no
-reader is machinery with no caller, and the registry/TOML identity check holds per
-merge SHA — every later chunk that adds a key adds it to both files.
+C2 (run 0b1) declared eight production keys; C6 (run 0b2) adds the sixteen
+``routing.*`` keys below them, for twenty-four. The remaining ``identity.*`` and
+``internal.secret_ref`` (C7), ``api.cors_origins`` and ``modules.installed`` (the runs
+that read them) are not declared here: a key with no reader is machinery with no
+caller, and the registry/TOML identity check holds per merge SHA — every later chunk
+that adds a key adds it to both files.
 
 The text codec (:func:`decode_text` / :func:`encode_text`) also lives here because the
 same encoding serves three readers: environment variables, the ``value text`` column
@@ -428,6 +429,145 @@ PRODUCTION_KEYS: Final[tuple[KeySpec, ...]] = (
         floor=Floor.MIN,
         explicit_per_workspace=False,
         default=30,
+    ),
+    # --- routing (C6, run 0b2) -------------------------------------------------------
+    # Sixteen flat keys for what the ratified `RoutingConfig` draws as a nested object.
+    # That is a volume consequence of this registry having four scalar value types and
+    # no nested or dict type, not a design choice: every scalar the object needs gets
+    # its own key. Two of the object's fields are deliberately absent — the identity
+    # surface's `fixed_path` is an invariant hardcoded in `routing/config.py` (every
+    # application host serves `/auth/*` in both modes, so an operator must not be able
+    # to relocate it), and `routing.modules.*` declares nothing in 0b because the
+    # module surface map is statically empty until modules exist.
+    KeySpec(
+        key="routing.mode",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="path",
+        choices=("path", "subdomain"),
+    ),
+    KeySpec(
+        key="routing.scheme",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="https",
+        choices=("https", "http"),
+    ),
+    KeySpec(
+        key="routing.base_host",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="localhost",
+    ),
+    KeySpec(
+        key="routing.shell.host",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="circuit",
+    ),
+    KeySpec(
+        key="routing.shell.path",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="/",
+    ),
+    KeySpec(
+        key="routing.identity.host",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="auth",
+    ),
+    KeySpec(
+        key="routing.identity.path",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="/auth",
+    ),
+    KeySpec(
+        key="routing.api.host",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="api",
+    ),
+    KeySpec(
+        key="routing.api.path",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="/api",
+    ),
+    KeySpec(
+        key="routing.mcp.host",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="mcp",
+    ),
+    KeySpec(
+        key="routing.mcp.path",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="/mcp",
+    ),
+    KeySpec(
+        key="routing.docs.host",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="docs",
+    ),
+    KeySpec(
+        key="routing.docs.external",
+        type=ValueType.BOOL,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default=True,
+    ),
+    KeySpec(
+        key="routing.integration.host",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="tuttle",
+    ),
+    KeySpec(
+        key="routing.integration.external",
+        type=ValueType.BOOL,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default=True,
+    ),
+    KeySpec(
+        key="routing.integration.reserved",
+        type=ValueType.BOOL,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default=True,
     ),
 )
 

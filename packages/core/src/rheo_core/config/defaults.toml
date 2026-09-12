@@ -6,8 +6,9 @@
 #
 # That check holds PER MERGE SHA: every later chunk that adds a key adds it to both
 # this file and schema.py, and no run declares a key that only a later run reads. C2
-# (run 0b1) declares exactly the eight keys below. Harness keys (tests/harness/) are
-# registry-only by design and never appear here.
+# (run 0b1) declared the first eight keys below; C6 (run 0b2) added the sixteen
+# routing.* keys under them, so this file carries twenty-four. Harness keys
+# (tests/harness/) are registry-only by design and never appear here.
 
 profile = "development"
 
@@ -21,3 +22,37 @@ pool_max_connections = 5
 [identity.token_max_days]
 cli = 90
 mcp = 30
+
+# The URL topology (C6). `mode = path` is the single-host arrangement a fresh install
+# produces; the demo overrides scheme and base_host through RHEO__routing__*. The
+# identity surface's fixed_path is an invariant in code, not a key, and routing.modules
+# declares nothing until modules exist.
+[routing]
+mode = "path"
+scheme = "https"
+base_host = "localhost"
+
+[routing.shell]
+host = "circuit"
+path = "/"
+
+[routing.identity]
+host = "auth"
+path = "/auth"
+
+[routing.api]
+host = "api"
+path = "/api"
+
+[routing.mcp]
+host = "mcp"
+path = "/mcp"
+
+[routing.docs]
+host = "docs"
+external = true
+
+[routing.integration]
+host = "tuttle"
+external = true
+reserved = true
