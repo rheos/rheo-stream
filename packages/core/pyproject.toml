@@ -5,7 +5,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "rheo-contracts",
     "sqlalchemy>=2.0,<3",
-    "psycopg[binary]>=3.2,<4",
+    "psycopg[binary]>=3.3.5,<4",
     "alembic>=1.13,<2",
     "pydantic>=2,<3",
 ]
