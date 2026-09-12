@@ -95,8 +95,12 @@ class GitHubProvider:
             token_response.raise_for_status()
             access_token = token_response.json()["access_token"]
         finally:
-            # The secret's bytes were only ever a local, never assigned back onto
-            # ``self`` or logged; nothing above this line survives the call.
+            # Drops this local binding as soon as it's no longer needed, narrowing
+            # the window it's reachable in this frame. Not a security guarantee:
+            # ``del`` only removes the name here, it neither zeroes
+            # ``SecretValue``'s underlying bytes nor makes them unreachable while
+            # any other reference (or the interpreter's own internals) still holds
+            # them.
             del secret
         auth_headers = {
             "Authorization": f"Bearer {access_token}",
