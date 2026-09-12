@@ -35,6 +35,7 @@ from rheo_core.storage.backend import (
     IDENTITY_EXISTS,
     SLUG_TAKEN,
     WORKSPACE_MISSING,
+    WORKSPACE_STATE,
     StorageRefusal,
 )
 from rheo_core.storage.control_tables import WorkspaceState
@@ -293,9 +294,18 @@ def set_workspace_state(
     *,
     state: WorkspaceState,
     state_detail: str | None,
+    expected_states: frozenset[WorkspaceState] | None = None,
 ) -> None:
-    """Write ``state`` and ``state_detail``; ``workspace_missing`` when no row."""
-    result = conn.execute(
+    """Write ``state`` and ``state_detail``; ``workspace_missing`` when no row.
+
+    ``expected_states``, when given, makes this a compare-and-set: the ``UPDATE``
+    only applies while the row's current state is one of ``expected_states``
+    (issue #23). On a mismatch the row is re-selected to disambiguate: absent is
+    still ``workspace_missing``; present but outside the set is ``workspace_state``,
+    naming the row's actual state — this is what stops a lagging retry walker from
+    stamping ``provisioning`` back over a leader's ``active``.
+    """
+    statement = (
         update(t.workspace)
         .where(t.workspace.c.id == workspace_id)
         .values(
@@ -304,8 +314,22 @@ def set_workspace_state(
             state_changed_at=_now(),
         )
     )
-    if result.rowcount != 1:
+    if expected_states is not None:
+        statement = statement.where(
+            t.workspace.c.state.in_([s.value for s in expected_states])
+        )
+    result = conn.execute(statement)
+    if result.rowcount == 1:
+        return
+    row = get_workspace(conn, workspace_id)
+    if row is None:
         raise StorageRefusal(WORKSPACE_MISSING, f"workspace {workspace_id} has no row")
+    raise StorageRefusal(
+        WORKSPACE_STATE,
+        f"workspace {workspace_id} is {row.state.value!r}, not one of "
+        f"{sorted(s.value for s in expected_states or ())}",
+        workspace_state=row.state.value,
+    )
 
 
 # --- membership -----------------------------------------------------------------------

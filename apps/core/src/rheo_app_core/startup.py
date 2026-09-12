@@ -1,7 +1,8 @@
 """The ``core`` process's startup sequence, run once from the FastAPI ``lifespan``.
 
-In order: settings → data root → the ``secret://env/*`` reference check → ensure the
-control database and run the ``control`` chain → migrate active workspaces serially
+In order: settings → the production/https invariant → data root → the
+``secret://env/*`` reference check → ensure the control database and run the
+``control`` chain → the identity-provider sync → migrate active workspaces serially
 → build the operation registry. "Ensure the control database" treats psycopg's
 ``DuplicateDatabase`` as success (``PostgresBackend.ensure_database``), mirroring
 provisioning's "already exists is a retry": the advisory lock covers the migration
@@ -16,12 +17,14 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from rheo_core.identity import sync_providers
 from rheo_core.migrations.orchestrator import (
     MigrationResult,
     migrate_active_workspaces,
     migrate_control,
 )
 from rheo_core.operations import register_core_operations
+from rheo_core.routing import SCHEME_KEY
 from rheo_core.secrets import check_env_references
 from rheo_core.settings import PROFILE_KEY, resolve
 from rheo_core.storage.data_root import (
@@ -32,6 +35,24 @@ from rheo_core.storage.data_root import (
 from rheo_core.storage.postgres import get_backend
 
 logger = logging.getLogger("rheo_app_core.startup")
+
+
+def _check_production_scheme(profile: str, scheme: str) -> None:
+    """Refuse startup when a production profile resolved ``routing.scheme =
+    "http"``, naming both values. This process's startup-time companion to
+    ``cookies.py``'s own per-request Secure-dropping rule (07's): that rule
+    decides, on every request, whether to drop ``Secure`` for a local-http demo;
+    this one runs once, at boot, and is the invariant 07 could not implement from
+    ``packages/core/`` because it needs both the resolved profile and the routing
+    scheme together. Mirrors this file's own env-reference check below: a small
+    function, called early, that raises loudly rather than letting a
+    misconfigured production deployment serve session cookies over plain http.
+    """
+    if profile == "production" and scheme == "http":
+        raise RuntimeError(
+            f"routing.scheme is {scheme!r} but the resolved profile is "
+            f"{profile!r}; a production deployment must serve https"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +70,9 @@ class StartupReport:
 def run_startup() -> StartupReport:
     """The sequence in the module docstring; blocking, run off the event loop."""
     settings = resolve()
+    _check_production_scheme(
+        settings.get_str(PROFILE_KEY), settings.get_str(SCHEME_KEY)
+    )
     resolution = resolve_data_root()
     root = validate_data_root(
         resolution.path,
@@ -58,6 +82,7 @@ def run_startup() -> StartupReport:
     env_references = check_env_references(settings)
     backend = get_backend()
     control = migrate_control(backend)
+    sync_providers(backend, settings)
     workspaces = migrate_active_workspaces(backend)
     operations = tuple(sorted(op.name for op in register_core_operations()))
     report = StartupReport(

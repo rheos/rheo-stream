@@ -12,7 +12,7 @@ The no-subcommand path bootstraps nothing: no settings resolution, no data root,
 no database. Settings and the backend are bootstrapped inside a subcommand's own
 handler (``context.py``). Commands at this run's merge SHA: ``migrate``,
 ``account create``, ``workspace create|repair|list|status``, ``doctor``,
-``routing hosts``.
+``routing hosts``, ``member add``.
 """
 
 import argparse
@@ -24,7 +24,7 @@ from rheo_core.settings import SettingsError
 from rheo_core.storage.backend import StorageRefusal
 from rheo_core.storage.data_root import DataRootRefusal
 
-from rheo_app_cli.commands import account, doctor, migrate, routing, workspace
+from rheo_app_cli.commands import account, doctor, member, migrate, routing, workspace
 
 Handler = Callable[[argparse.Namespace], int]
 
@@ -36,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
         "migrations and diagnostics.",
     )
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
-    for module in (migrate, account, workspace, doctor, routing):
+    for module in (migrate, account, workspace, doctor, routing, member):
         module.add_parser(subparsers)
     return parser
 
