@@ -1,4 +1,4 @@
-"""B8 (criterion 10, the 0b1 half): ``core.workspace.status`` through the registry.
+"""B8 (criterion 10): ``core.workspace.status`` through the registry.
 
 Under an operator context from ``context_for_operator`` and under owner and member
 contexts from ``context_for_harness``, the operation returns ``core_version`` equal
@@ -6,7 +6,8 @@ to the installed ``rheo-core`` distribution version, ``core_contract_version = 1
 and ``modules = []``. A statement-capturing SQLAlchemy connection event on the
 workspace engine asserts the handler reads ``core.workspace_composition``,
 ``core.module_state`` and ``core.module_schema_version``, and no table named
-``alembic_version%``. The session-context half is C7's (0b2).
+``alembic_version%``. The session-context half (C7a, 0b2) is this file's own
+addition below: a third case, under a real ``context_from_session`` context.
 """
 
 from importlib import metadata
@@ -17,14 +18,19 @@ from conftest import ClusterSession
 from harness.registry import add_member, enable_harness_module
 from rheo_contracts import CONTRACT_VERSION, Role, WorkspaceContext
 from rheo_core.boundary import context_for_harness, context_for_operator
+from rheo_core.boundary.factories import context_from_session
 from rheo_core.operations import (
     WORKSPACE_STATUS,
     WorkspaceStatus,
     dispatch,
     register_core_operations,
 )
+from rheo_core.sessions import create_session, mint_host_secret
 from rheo_core.storage.backend import UnitOfWork
+from rheo_core.storage.control_plane import set_active_workspace
 from sqlalchemy import Engine, event
+
+_HOST = "shell.example.test"
 
 pytestmark = pytest.mark.postgres
 
@@ -120,6 +126,20 @@ def test_status_lists_an_enabled_module_with_no_applied_schema_step(
             "schema_version": None,
         }
     ]
+
+
+def test_status_under_a_real_session_context(
+    cluster: ClusterSession, workspace: UUID, owner_account_id: UUID
+) -> None:
+    """The session-context half (C7a): the same operation, driven by a real
+    ``context_from_session`` context rather than the harness scaffolding above."""
+    session_row = create_session(owner_account_id)
+    secret = mint_host_secret(session_row.id, _HOST)
+    with cluster.backend.control_engine.begin() as connection:
+        set_active_workspace(connection, session_row.id, workspace)
+    ctx = context_from_session(secret, _HOST)
+    assert isinstance(ctx, WorkspaceContext)
+    _assert_status(_status_under(cluster, ctx, workspace))
 
 
 def test_status_ignores_extra_payload_keys(

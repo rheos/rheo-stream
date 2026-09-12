@@ -14,12 +14,13 @@ production keys and the identity check would fail if it held more. So every
 registration carries its default, and for the production keys the registry default and
 the TOML value are the same value in two places, which the identity check also asserts.
 
-C2 (run 0b1) declared eight production keys; C6 (run 0b2) adds the sixteen
-``routing.*`` keys below them, for twenty-four. The remaining ``identity.*`` and
-``internal.secret_ref`` (C7), ``api.cors_origins`` and ``modules.installed`` (the runs
-that read them) are not declared here: a key with no reader is machinery with no
-caller, and the registry/TOML identity check holds per merge SHA — every later chunk
-that adds a key adds it to both files.
+C2 (run 0b1) declared eight production keys; C6 (run 0b2) added the sixteen
+``routing.*`` keys below them, for twenty-four; C7a (run 0b2) adds the eight
+``identity.*``/``internal.secret_ref`` keys below those, for thirty-two.
+``api.cors_origins`` and ``modules.installed`` (the runs that read them) are not
+declared here: a key with no reader is machinery with no caller, and the
+registry/TOML identity check holds per merge SHA — every later chunk that adds a key
+adds it to both files.
 
 The text codec (:func:`decode_text` / :func:`encode_text`) also lives here because the
 same encoding serves three readers: environment variables, the ``value text`` column
@@ -568,6 +569,86 @@ PRODUCTION_KEYS: Final[tuple[KeySpec, ...]] = (
         floor=None,
         explicit_per_workspace=False,
         default=True,
+    ),
+    # --- identity (C7a, run 0b2) ------------------------------------------------------
+    # ``identity.allow_signup`` and ``identity.allow_workspace_create`` are plain bools,
+    # not "nullable" (fit-check.md D6): the registry has no None-typed default, and a
+    # first-account bootstrap is already computed in ``accounts.py`` regardless of the
+    # flag's value, so ``false`` expresses the ratified behaviour identically to a
+    # tri-state default would.
+    KeySpec(
+        key="identity.allow_signup",
+        type=ValueType.BOOL,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default=False,
+    ),
+    KeySpec(
+        key="identity.allow_workspace_create",
+        type=ValueType.BOOL,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default=False,
+    ),
+    KeySpec(
+        key="identity.session_idle_days",
+        type=ValueType.INT,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default=14,
+    ),
+    KeySpec(
+        key="identity.session_max_days",
+        type=ValueType.INT,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default=30,
+    ),
+    KeySpec(
+        key="identity.providers.github.enabled",
+        type=ValueType.BOOL,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default=False,
+    ),
+    KeySpec(
+        key="identity.providers.github.client_id",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="",
+    ),
+    # Empty-string package default, deliberately not ``secret://env/...``
+    # (fit-check.md D4): the real reference is a deployment-time concern 11 wires into
+    # compose. A package default of a live ``secret://env/`` reference would make
+    # ``check_env_references`` refuse every startup — compose, ``make demo``, CI, a
+    # fresh clone's ``uv run pytest`` — before an operator ever configures the
+    # provider, because the named environment variable is not set until 11 wires it.
+    # ``is_secret_reference("")`` is ``False``, so the startup check stays quiet until
+    # an operator writes a real reference into deployment settings.
+    KeySpec(
+        key="identity.providers.github.client_secret_ref",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="",
+    ),
+    # Same empty-string reasoning as the GitHub client secret above: the real
+    # ``secret://env/RHEO_INTERNAL_SECRET`` reference is 11's deployment concern.
+    KeySpec(
+        key="internal.secret_ref",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="",
     ),
 )
 

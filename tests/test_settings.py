@@ -80,6 +80,14 @@ PRODUCTION_KEYS = {
     "routing.integration.host": "tuttle",
     "routing.integration.external": True,
     "routing.integration.reserved": True,
+    "identity.allow_signup": False,
+    "identity.allow_workspace_create": False,
+    "identity.session_idle_days": 14,
+    "identity.session_max_days": 30,
+    "identity.providers.github.enabled": False,
+    "identity.providers.github.client_id": "",
+    "identity.providers.github.client_secret_ref": "",
+    "internal.secret_ref": "",
 }
 
 

@@ -88,7 +88,16 @@ class ResolvedSettings(Mapping[str, SettingValue]):
         return key in self._values
 
     def __repr__(self) -> str:
-        return f"ResolvedSettings({dict(self._values)!r})"
+        # Key names only, never values (fit-check.md Q2a): a resolved value can be a
+        # secret:// reference (or, one day, something worse), and this repr fires
+        # implicitly — a pytest assertion diff, a traceback frame, a stray
+        # logger.debug("%r", settings). Selective redaction via is_secret_reference
+        # was considered and rejected: it would add a settings -> secrets import edge
+        # that does not exist today, for no gain over not printing values at all.
+        return (
+            f"ResolvedSettings({len(self._values)} keys: "
+            f"{', '.join(sorted(self._values))})"
+        )
 
     def _typed(self, key: str, value_type: ValueType) -> FrozenValue:
         spec = REGISTRY.get(key)

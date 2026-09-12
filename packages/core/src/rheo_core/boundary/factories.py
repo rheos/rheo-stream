@@ -11,6 +11,8 @@ Both factories share one tail: the ``control.workspace`` row must be ``active``
 tail is B16's factory clause for this run.
 """
 
+import hashlib
+from datetime import UTC, datetime
 from uuid import UUID
 
 from rheo_contracts import (
@@ -27,14 +29,22 @@ from rheo_contracts import (
 from rheo_core.boundary.context import (
     MEMBERSHIP_MISSING,
     PROFILE_REQUIRED,
+    SESSION_EXPIRED,
+    SESSION_MISSING,
+    SESSION_REVOKED,
     WORKSPACE_MISSING_DETAIL,
     WORKSPACE_UNAVAILABLE,
+    WORKSPACE_UNSELECTED,
     Refusal,
 )
 from rheo_core.refs import uuid7
 from rheo_core.settings import current_profile
 from rheo_core.storage.backend import UnitOfWork
-from rheo_core.storage.control_plane import get_membership, get_workspace
+from rheo_core.storage.control_plane import (
+    get_membership,
+    get_session_by_secret_hash,
+    get_workspace,
+)
 from rheo_core.storage.control_tables import WorkspaceState
 from rheo_core.storage.postgres import PostgresBackend, get_backend
 from rheo_core.storage.repositories import list_module_states
@@ -160,6 +170,71 @@ def context_for_harness(
         role=wanted,
         entry=Entry(entry),
         audience=Audience(kind=AudienceKind.SESSION, id=account_id),
+        operation_set=ALL_OPERATIONS,
+        enabled_modules=enabled,
+        request_id=uuid7(),
+    )
+
+
+def context_from_session(
+    secret: bytes, host: str, entry: Entry | str = Entry.WEB
+) -> WorkspaceContext | Refusal:
+    """A web session's context (0b2/C7a): the contract 08's ``/auth/*`` routes and
+    internal listener build against (``00-index.md`` § Coupling seams, 07 -> 08).
+
+    Exact refusal order, followed literally because 08 builds HTTP status mapping
+    against it: hash ``secret`` (SHA-256) and look up the ``session_secret`` row
+    scoped to ``host`` (one join, ``get_session_by_secret_hash``) -> ``session_missing``
+    if no row; else ``session_expired`` when the session's idle **or** absolute
+    timeout has passed (both collapse to this one state; ``expires_at`` already
+    reflects the tighter of the two, see ``rheo_core.sessions.service``); else
+    ``session_revoked`` when ``revoked_at`` is not null; else ``workspace_unselected``
+    when ``active_workspace_id`` is null. Then — and only then — read
+    ``control.membership`` **at request time** (never anything cached on the session
+    row) for ``(account_id, active_workspace_id)``, refusing ``membership_missing``
+    (the existing constant, unchanged) if absent. Success runs the shared factory tail
+    every 0b1 factory already runs (``_active_workspace_modules``): the workspace-active
+    check (so a session pointed at a workspace gone ``unavailable`` refuses
+    ``workspace_unavailable`` exactly like the other two factories, B16's clause) and
+    the ``enabled_modules`` load. The context carries actor ``account`` (the session's
+    account), the role from the membership row just read, audience ``session`` with
+    that same account id, the full operation set, and ``entry`` as given (default
+    ``web``).
+    """
+    backend = get_backend()
+    secret_hash = hashlib.sha256(secret).digest()
+    with backend.control_engine.connect() as connection:
+        session_row = get_session_by_secret_hash(
+            connection, secret_hash=secret_hash, host=host
+        )
+        if session_row is None:
+            return Refusal(SESSION_MISSING)
+        if session_row.expires_at <= datetime.now(UTC):
+            return Refusal(SESSION_EXPIRED)
+        if session_row.revoked_at is not None:
+            return Refusal(SESSION_REVOKED)
+        if session_row.active_workspace_id is None:
+            return Refusal(WORKSPACE_UNSELECTED)
+        membership = get_membership(
+            connection,
+            account_id=session_row.account_id,
+            workspace_id=session_row.active_workspace_id,
+        )
+    if membership is None:
+        return Refusal(
+            MEMBERSHIP_MISSING,
+            f"no control.membership row for account {session_row.account_id} in "
+            f"workspace {session_row.active_workspace_id}",
+        )
+    enabled = _active_workspace_modules(backend, session_row.active_workspace_id)
+    if isinstance(enabled, Refusal):
+        return enabled
+    return WorkspaceContext(
+        workspace_id=session_row.active_workspace_id,
+        actor=Actor(kind=ActorKind.ACCOUNT, id=session_row.account_id),
+        role=membership.role,
+        entry=Entry(entry),
+        audience=Audience(kind=AudienceKind.SESSION, id=session_row.account_id),
         operation_set=ALL_OPERATIONS,
         enabled_modules=enabled,
         request_id=uuid7(),
