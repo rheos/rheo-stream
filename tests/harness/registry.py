@@ -15,6 +15,19 @@ is the only way a 0b1 test can exercise the ``module_disabled`` branch both ways
 
 Registration is explicit (:func:`register_harness`), idempotent, and never an import
 side effect. Nothing under ``rheo_core`` knows any of this exists.
+
+**``harness.note.get`` also serves as the MCP facade's ``harness_get_note`` tool**
+(C8, run 0b2), declared as a ``ToolDeclaration`` in
+``rheo_core.tokens.sets.REGISTERED_TOOLS`` rather than here — that module
+cannot import test code (a shipped package must not depend on
+``tests/harness``, which is never installed), so it duplicates this
+operation's name (``NOTE_GET``, ``"harness.note.get"``) and ``NoteRefInput``'s
+shape as its own literal and its own tiny local model, rather than importing
+either from this file. The test-profile gate for that second life is not a
+runtime check in ``sets.py``: ``agent_default`` intersects its declared tools'
+operations with the registry's live names, and this operation is only ever
+actually registered by :func:`register_harness` below, so it is absent from
+that intersection under any profile that never calls it.
 """
 
 import warnings

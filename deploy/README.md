@@ -34,8 +34,69 @@ is a foreign key to `account`, so a workspace's owner account has to exist first
 `account create` and `workspace create` each print exactly the new id and a newline
 to stdout (every diagnostic goes to stderr), so a script can capture the id directly
 from the command's output. Also available: `rheo workspace repair|list|status` and
-`rheo doctor`. `rheo member add` and other multi-member commands do not exist at this
-run's merge SHA — a later run documents them when they do.
+`rheo doctor`. `rheo member add --workspace <id> --account <id> --role owner|member`
+is how a second membership is created in release one — there is no self-service
+invitation flow yet, so an operator runs this after the second identity has signed
+in through the provider at least once (`resolve_or_create` needs the `account` row
+to exist first); it mints no id of its own and prints only a confirmation to
+stderr.
+
+## Routing and application hosts
+
+`core` and the web tier implement one URL topology in two modes
+(`routing.mode`, `docs/architecture/identity-and-topology.md` § URL topology as
+configuration has the full contract): **`path`** — a fresh install's default,
+one host, every surface a path prefix — and **`subdomain`** — one label per
+surface under a shared `base_host`, needing wildcard DNS and a wildcard
+certificate for that one label. Both modes are one implementation, mode-branched
+only inside `url_for`/`urlFor`; nothing in `core` or the web tier ever spells a
+host or a topology-specific prefix out directly (`scripts/check_routing_literals.py`
+is the mechanical check).
+
+The reverse proxy's own rules are identical in both modes; only the host match
+changes:
+
+| Request | Goes to |
+| --- | --- |
+| Any application host, `/auth/*` | `core` (identity endpoints) |
+| `api` surface | `core` (HTTP API); token auth |
+| `mcp` surface | `core` (MCP facade); token auth |
+| Any application host, everything else | `web` |
+| apex, `docs`, the reserved integration host | not this application |
+
+"Application host" means the shell host, the identity host, and every enabled
+module host in subdomain mode, or the single host in path mode. `rheo routing
+hosts` prints the exact list for the deployment as configured, then the OAuth
+callback URL to register, hosts first, one per line:
+
+```
+$ rheo routing hosts
+routing mode subdomain: 3 application host(s), then the OAuth callback URL
+auth.example.test
+circuit.example.test
+leads.example.test
+https://auth.example.test/auth/callback
+```
+
+Register that last line as the callback URL on the identity provider's OAuth app
+(GitHub in release one) before setting `identity.providers.github.enabled = true`
+— `/auth/login` builds the exact same URL server-side through `url_for`, so a
+mismatch here is a `redirect_uri_mismatch` from the provider, not a bug in `core`.
+
+**The internal listener (port 8100) is never routed by the reverse proxy, under
+any configuration, and the web tier can reach it only from inside the container
+network.** This is not a route the proxy happens to omit: `deploy/` publishes no
+port for it, and the reference proxy template has no rule that could reach it
+even by mistake. `make demo`'s own checkpoint asserts this mechanically — a
+host-side request to `:8100` fails to connect, while the identical request run
+inside the container network succeeds. The web tier's own reach to it is gated
+the same way: `RHEO_CORE_INTERNAL_API_URL` only resolves to something when the
+web tier itself runs on the compose network, which is why `make demo` (which
+runs the web shell with `next start` on the host, outside compose) deliberately
+leaves that variable unset and the shell renders its routing-unavailable state
+instead of guessing at a URL. A deployment where web is not on the container
+network has no route to the internal listener at all, by construction — not by
+an oversight left to fix later.
 
 Rate limiting of the webhook receiver and of `/auth/*` is the reverse proxy's
 responsibility in release one; it is not implemented by `core` itself. This is a

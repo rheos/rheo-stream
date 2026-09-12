@@ -311,11 +311,16 @@ def test_a_handler_exception_rolls_back_and_yields_a_fixed_failure_code(
     # The write before the raise was rolled back.
     with _uow(cluster, a) as uow:
         assert list_notes(uow.connection) == ()
-    # The exception went to the log, tagged with the request id.
+    # The exception went to the log, tagged with the request id and the exception's
+    # class name only — never a formatted traceback (fit-check.md Q2b, closed in
+    # run 0b2/C7b: ``logger.exception`` implied ``exc_info=True``, which would have
+    # carried this same driver-shaped message into the log record).
     (record,) = [r for r in caplog.records if r.getMessage() == "operation_failed"]
     assert record.request_id == str(ctx.request_id)  # type: ignore[attr-defined]
     assert record.operation == NOTE_EXPLODE  # type: ignore[attr-defined]
-    assert record.exc_info is not None and "hunter2" in caplog.text
+    assert record.exception_type == "RuntimeError"  # type: ignore[attr-defined]
+    assert record.exc_info is None
+    assert "hunter2" not in caplog.text
 
 
 def test_a_settings_write_in_a_leaves_b_unchanged_through_the_registry(

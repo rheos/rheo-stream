@@ -26,6 +26,7 @@ lint:
 	uv run ruff check .
 	uv run ruff format --check .
 	pnpm -C apps/web lint
+	python3 scripts/check_routing_literals.py
 
 typecheck:
 	uv run mypy
@@ -149,10 +150,25 @@ demo:
 		echo "FAIL  core  http://localhost:$$core_port/healthz did not become ready within 60s"; \
 		exit 1; \
 	fi; \
+	rc=0; \
+	internal_secret="rheo_dev_only_internal_secret"; \
+	echo "Checking the internal listener (8100) is unreachable from the host..."; \
+	internal_http_code="$$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:8100/internal/v1/routing" 2>/dev/null || true)"; \
+	if [ -n "$$internal_http_code" ] && [ "$$internal_http_code" != "000" ]; then \
+		echo "FAIL  internal  http://localhost:8100/internal/v1/routing was reachable from the host (http $$internal_http_code) — compose must never publish 8100"; rc=1; \
+	else \
+		echo "PASS  internal  http://localhost:8100/internal/v1/routing is unreachable from the host"; \
+	fi; \
+	echo "Checking the internal listener answers inside the container network..."; \
+	if docker compose -p "$$demo_project" -f deploy/compose.yaml exec -T core \
+		curl -sf -H "X-Rheo-Internal: $$internal_secret" http://localhost:8100/internal/v1/routing >/dev/null 2>&1; then \
+		echo "PASS  internal  container-network curl to :8100/internal/v1/routing succeeded"; \
+	else \
+		echo "FAIL  internal  container-network curl to :8100/internal/v1/routing failed (serve() may not have started internal_app, or the secret drifted from compose.yaml's)"; rc=1; \
+	fi; \
 	RHEO_CORE_INTERNAL_URL="http://localhost:$$core_port" PORT="$$web_port" pnpm -C apps/web build; \
 	RHEO_CORE_INTERNAL_URL="http://localhost:$$core_port" PORT="$$web_port" pnpm -C apps/web start & \
 	WEB_PID=$$!; \
-	rc=0; \
 	if curl -sf "http://localhost:$$core_port/healthz" 2>/dev/null | grep -q '"status":"ok","contract_version":'; then \
 		echo "PASS  core  http://localhost:$$core_port/healthz"; \
 	else \

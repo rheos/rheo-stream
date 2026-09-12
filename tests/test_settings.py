@@ -50,6 +50,11 @@ from rheo_core.settings import (
 WORKSPACE = UUID("018f0000-0000-7000-8000-000000000001")
 ACCOUNT = UUID("018f0000-0000-7000-8000-000000000002")
 
+# The third copy of the production key set, and the reason a key lands in three files
+# at once: ``schema.py`` declares it, ``config/defaults.toml`` carries its value, and
+# this literal is what proves those two are not merely consistent with each other.
+# Adding a key to only the first two reds the tests below rather than the chunk that
+# forgot this one, so move all three together.
 PRODUCTION_KEYS = {
     "storage.cluster_dsn_ref": "secret://env/RHEO_CLUSTER_DSN",
     "storage.control_database": "rheo_control",
@@ -59,6 +64,30 @@ PRODUCTION_KEYS = {
     "profile": "development",
     "identity.token_max_days.cli": 90,
     "identity.token_max_days.mcp": 30,
+    "routing.mode": "path",
+    "routing.scheme": "https",
+    "routing.base_host": "localhost",
+    "routing.shell.host": "circuit",
+    "routing.shell.path": "/",
+    "routing.identity.host": "auth",
+    "routing.identity.path": "/auth",
+    "routing.api.host": "api",
+    "routing.api.path": "/api",
+    "routing.mcp.host": "mcp",
+    "routing.mcp.path": "/mcp",
+    "routing.docs.host": "docs",
+    "routing.docs.external": True,
+    "routing.integration.host": "tuttle",
+    "routing.integration.external": True,
+    "routing.integration.reserved": True,
+    "identity.allow_signup": False,
+    "identity.allow_workspace_create": False,
+    "identity.session_idle_days": 14,
+    "identity.session_max_days": 30,
+    "identity.providers.github.enabled": False,
+    "identity.providers.github.client_id": "",
+    "identity.providers.github.client_secret_ref": "",
+    "internal.secret_ref": "",
 }
 
 
@@ -105,7 +134,7 @@ def ignored_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]
 # --- the registry and the identity check --------------------------------------------
 
 
-def test_registry_declares_exactly_the_eight_production_keys() -> None:
+def test_the_registry_declares_every_production_key_and_its_shape() -> None:
     assert REGISTRY.keys(origin=CORE_ORIGIN) == frozenset(PRODUCTION_KEYS)
     assert dict(PACKAGE_DEFAULTS) == PRODUCTION_KEYS
     for key, value in PRODUCTION_KEYS.items():

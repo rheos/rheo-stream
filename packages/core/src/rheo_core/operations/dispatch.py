@@ -145,13 +145,17 @@ def dispatch(
             _rollback(uow)
             # The exception text is for the log, never the outcome: a driver error
             # renders the statement and its parameters, and ``error_text`` is
-            # documented as safe to show.
-            logger.exception(
+            # documented as safe to show. ``logger.exception`` implies
+            # ``exc_info=True``, which would carry that same formatted traceback
+            # into the log record; ``logger.error`` with only the exception's class
+            # name keeps the log line as safe as the outcome already is.
+            logger.error(
                 "operation_failed",
                 extra={
                     "operation": name,
                     "workspace_id": str(ctx.workspace_id),
                     "request_id": str(ctx.request_id),
+                    "exception_type": type(exc).__name__,
                 },
             )
             return OperationOutcome(

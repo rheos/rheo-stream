@@ -83,6 +83,12 @@ PUBLIC_PATHS = (
     "packs/freelance-software/defaults.yaml",
     "tests/fixtures/synthetic-person.json",
     "tests/fixtures/synthetic-leads.csv",
+    # 0b2: the shared routing fixture pytest and vitest are both proven against
+    # (C6 creates the files; declaring them public is C10's, the same reasoning
+    # 0b1's C5 used for not claiming a file 0b1 never creates).
+    "tests/fixtures/routing/path-mode.json",
+    "tests/fixtures/routing/subdomain-mode.json",
+    "tests/fixtures/routing/expected-urls.json",
     "docs/example.pdf",
     "README.md",
     # Public build and config files 0a's harness adds (asserted not ignored).

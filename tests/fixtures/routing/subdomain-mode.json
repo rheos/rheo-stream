@@ -1,0 +1,14 @@
+{
+  "mode": "subdomain",
+  "scheme": "https",
+  "base_host": "example.test",
+  "surfaces": {
+    "shell": { "host": "circuit", "path": "/" },
+    "identity": { "host": "auth", "path": "/auth", "fixed_path": true },
+    "api": { "host": "api", "path": "/api" },
+    "mcp": { "host": "mcp", "path": "/mcp" },
+    "docs": { "host": "docs", "external": true },
+    "integration": { "host": "tuttle", "external": true, "reserved": true },
+    "modules": {}
+  }
+}

@@ -26,6 +26,8 @@ from fastapi import FastAPI
 from rheo_contracts import CONTRACT_VERSION
 from rheo_core.storage.postgres import get_backend
 
+from rheo_app_core import api_routes, auth_routes
+from rheo_app_core.internal_app import internal_app as internal_app
 from rheo_app_core.startup import run_startup
 
 # Not called in this run; naming it here records the composition-root import edge
@@ -52,6 +54,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(lifespan=lifespan)
+
+public_app = app
+"""``app`` bound to a second name. ``spec.md``'s architecture text and 11's
+``serve.py`` both say ``public_app``; ``tests/test_healthz.py`` and
+``tests/test_git_clean.py`` (neither in this run's scope) keep importing ``app``
+unchanged. One ``FastAPI()`` instance, two valid names (``00-index.md`` § Coupling
+seams) — pick ``public_app`` in any new code, ``app`` only where an existing
+0a-owned test file already imports it."""
+
+public_app.include_router(auth_routes.router)
+public_app.include_router(api_routes.router)
 
 
 @app.get("/healthz")

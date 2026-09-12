@@ -1,4 +1,5 @@
-"""Two static AST scans for the secret store's boundary (B9).
+"""Static AST scans for the secret store's boundary (B9) and, from 0b2 (C7a), the
+identity-provider boundary (B5).
 
 Both copy the walk shape of ``tests/test_imports.py``: parse every Python source, walk
 the tree, collect offenders, assert none. Static rather than a runtime import-graph
@@ -30,6 +31,7 @@ _SCAN_DIRS = ("packages", "apps", "scripts", "tests")
 _SECRETS_PACKAGE = _REPO_ROOT / "packages" / "core" / "src" / "rheo_core" / "secrets"
 _MODULES_DIR = _REPO_ROOT / "modules"
 _SECRETS_MODULE = "rheo_core.secrets"
+_IDENTITY_MODULE = "rheo_core.identity"
 
 # Generated build output and vendored dependencies, skipped while walking.
 SKIP_DIRS = frozenset(
@@ -128,6 +130,45 @@ def test_no_module_distribution_imports_the_secret_store() -> None:
             violations[str(path.relative_to(_REPO_ROOT))] = offenders
     assert not violations, (
         f"a module distribution imports rheo_core.secrets: {violations}"
+    )
+
+
+def _identity_imports(tree: ast.AST) -> list[str]:
+    """Every import that reaches ``rheo_core.identity`` or anything beneath it
+    (``rheo_core.identity.providers`` included): B5's boundary — a domain module
+    imports neither the providers package nor the boundary."""
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == _IDENTITY_MODULE or alias.name.startswith(
+                    _IDENTITY_MODULE + "."
+                ):
+                    offenders.append(alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            # A relative import (level > 0) cannot leave the module distribution.
+            if node.level != 0 or node.module is None:
+                continue
+            if node.module == _IDENTITY_MODULE or node.module.startswith(
+                _IDENTITY_MODULE + "."
+            ):
+                offenders.append(node.module)
+            elif node.module == "rheo_core" and any(
+                alias.name == "identity" for alias in node.names
+            ):
+                offenders.append(_IDENTITY_MODULE)
+    return offenders
+
+
+def test_no_module_distribution_imports_the_identity_boundary() -> None:
+    assert _MODULES_DIR.is_dir(), f"missing {_MODULES_DIR}"
+    violations: dict[str, list[str]] = {}
+    for path in _python_files(_MODULES_DIR):
+        offenders = _identity_imports(_parse(path))
+        if offenders:
+            violations[str(path.relative_to(_REPO_ROOT))] = offenders
+    assert not violations, (
+        f"a module distribution imports rheo_core.identity: {violations}"
     )
 
 

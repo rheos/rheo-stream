@@ -11,6 +11,8 @@ Both factories share one tail: the ``control.workspace`` row must be ``active``
 tail is B16's factory clause for this run.
 """
 
+import hashlib
+from datetime import UTC, datetime
 from uuid import UUID
 
 from rheo_contracts import (
@@ -27,17 +29,34 @@ from rheo_contracts import (
 from rheo_core.boundary.context import (
     MEMBERSHIP_MISSING,
     PROFILE_REQUIRED,
+    SESSION_EXPIRED,
+    SESSION_MISSING,
+    SESSION_REVOKED,
     WORKSPACE_MISSING_DETAIL,
     WORKSPACE_UNAVAILABLE,
+    WORKSPACE_UNSELECTED,
     Refusal,
 )
 from rheo_core.refs import uuid7
 from rheo_core.settings import current_profile
 from rheo_core.storage.backend import UnitOfWork
-from rheo_core.storage.control_plane import get_membership, get_workspace
+from rheo_core.storage.control_plane import (
+    get_membership,
+    get_session_by_secret_hash,
+    get_workspace,
+)
 from rheo_core.storage.control_tables import WorkspaceState
 from rheo_core.storage.postgres import PostgresBackend, get_backend
 from rheo_core.storage.repositories import list_module_states
+
+# A submodule import, not ``from rheo_core.tokens import resolve_token``:
+# ``rheo_core.tokens``'s own ``__init__.py`` deliberately does not re-export
+# ``presentation`` (see that package's docstring) precisely so this edge -- this
+# file, reached from ``rheo_core.boundary``'s own ``__init__.py``, needing
+# ``rheo_core.tokens.presentation``, which itself needs this file's sibling
+# ``rheo_core.boundary.context`` -- resolves regardless of which package a
+# caller happens to import first.
+from rheo_core.tokens.presentation import resolve_token
 
 # The ``core.module_state.state`` value that makes a module enabled; one of
 # ``rheo_core.storage.core_tables.MODULE_STATES``.
@@ -161,6 +180,107 @@ def context_for_harness(
         entry=Entry(entry),
         audience=Audience(kind=AudienceKind.SESSION, id=account_id),
         operation_set=ALL_OPERATIONS,
+        enabled_modules=enabled,
+        request_id=uuid7(),
+    )
+
+
+def context_from_session(
+    secret: bytes, host: str, entry: Entry | str = Entry.WEB
+) -> WorkspaceContext | Refusal:
+    """A web session's context (0b2/C7a): the contract 08's ``/auth/*`` routes and
+    internal listener build against (``00-index.md`` § Coupling seams, 07 -> 08).
+
+    Exact refusal order, followed literally because 08 builds HTTP status mapping
+    against it: hash ``secret`` (SHA-256) and look up the ``session_secret`` row
+    scoped to ``host`` (one join, ``get_session_by_secret_hash``) -> ``session_missing``
+    if no row; else ``session_expired`` when the session's idle **or** absolute
+    timeout has passed (both collapse to this one state; ``expires_at`` already
+    reflects the tighter of the two, see ``rheo_core.sessions.service``); else
+    ``session_revoked`` when ``revoked_at`` is not null; else ``workspace_unselected``
+    when ``active_workspace_id`` is null. Then — and only then — read
+    ``control.membership`` **at request time** (never anything cached on the session
+    row) for ``(account_id, active_workspace_id)``, refusing ``membership_missing``
+    (the existing constant, unchanged) if absent. Success runs the shared factory tail
+    every 0b1 factory already runs (``_active_workspace_modules``): the workspace-active
+    check (so a session pointed at a workspace gone ``unavailable`` refuses
+    ``workspace_unavailable`` exactly like the other two factories, B16's clause) and
+    the ``enabled_modules`` load. The context carries actor ``account`` (the session's
+    account), the role from the membership row just read, audience ``session`` with
+    that same account id, the full operation set, and ``entry`` as given (default
+    ``web``).
+    """
+    backend = get_backend()
+    secret_hash = hashlib.sha256(secret).digest()
+    with backend.control_engine.connect() as connection:
+        session_row = get_session_by_secret_hash(
+            connection, secret_hash=secret_hash, host=host
+        )
+        if session_row is None:
+            return Refusal(SESSION_MISSING)
+        if session_row.expires_at <= datetime.now(UTC):
+            return Refusal(SESSION_EXPIRED)
+        if session_row.revoked_at is not None:
+            return Refusal(SESSION_REVOKED)
+        if session_row.active_workspace_id is None:
+            return Refusal(WORKSPACE_UNSELECTED)
+        membership = get_membership(
+            connection,
+            account_id=session_row.account_id,
+            workspace_id=session_row.active_workspace_id,
+        )
+    if membership is None:
+        return Refusal(
+            MEMBERSHIP_MISSING,
+            f"no control.membership row for account {session_row.account_id} in "
+            f"workspace {session_row.active_workspace_id}",
+        )
+    enabled = _active_workspace_modules(backend, session_row.active_workspace_id)
+    if isinstance(enabled, Refusal):
+        return enabled
+    return WorkspaceContext(
+        workspace_id=session_row.active_workspace_id,
+        actor=Actor(kind=ActorKind.ACCOUNT, id=session_row.account_id),
+        role=membership.role,
+        entry=Entry(entry),
+        audience=Audience(kind=AudienceKind.SESSION, id=session_row.account_id),
+        operation_set=ALL_OPERATIONS,
+        enabled_modules=enabled,
+        request_id=uuid7(),
+    )
+
+
+def context_from_token(value: str, surface: str) -> WorkspaceContext | Refusal:
+    """A bearer token's context (0b2/C8): the ``api`` surface (``apps/core``) and
+    the MCP facade's ``session.py`` both build against this.
+
+    Implements none of the refusal chain itself: ``rheo_core.tokens.presentation.
+    resolve_token`` is the single implementation (parse, hash lookup,
+    kind-for-surface, expiry, revocation, non-token-issuable scope,
+    membership-at-presentation -- see that module's own docstring for the exact
+    order). This function only turns a :class:`~rheo_core.tokens.presentation.
+    ResolvedToken` into the one object the AST scan in ``tests/test_boundary.py``
+    allows this package to build, running the shared factory tail
+    (``_active_workspace_modules``) exactly as every other factory does.
+
+    Success: actor ``Actor(token, account_id)``, audience ``Audience(token,
+    account_id)``, role from the membership row ``resolve_token`` already read,
+    operation set the snapshot as a ``frozenset[str]``, entry the presenting
+    surface (``api`` or ``mcp``).
+    """
+    resolved = resolve_token(value, surface)
+    if isinstance(resolved, Refusal):
+        return resolved
+    enabled = _active_workspace_modules(get_backend(), resolved.workspace_id)
+    if isinstance(enabled, Refusal):
+        return enabled
+    return WorkspaceContext(
+        workspace_id=resolved.workspace_id,
+        actor=Actor(kind=ActorKind.TOKEN, id=resolved.account_id),
+        role=resolved.role,
+        entry=Entry(surface),
+        audience=Audience(kind=AudienceKind.TOKEN, id=resolved.account_id),
+        operation_set=resolved.operation_set,
         enabled_modules=enabled,
         request_id=uuid7(),
     )

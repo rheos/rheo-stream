@@ -24,6 +24,7 @@ from rheo_core.storage.backend import (
     SLUG_TAKEN,
     WORKSPACE_EXISTS,
     WORKSPACE_MISSING,
+    WORKSPACE_STATE,
     StorageRefusal,
     UnitOfWork,
 )
@@ -33,6 +34,7 @@ from rheo_core.storage.control_plane import (
     get_membership,
     insert_account,
     insert_identity,
+    set_workspace_state,
 )
 from rheo_core.storage.control_tables import WorkspaceState
 from rheo_core.storage.provisioning import (
@@ -42,6 +44,7 @@ from rheo_core.storage.provisioning import (
     STEP_INSERT_REGISTRY_ROW,
     STEP_MIGRATE_CORE,
     STEP_WRITE_DEFAULT_SETTINGS,
+    _record_step,
     core_version,
     database_name_for,
     provision,
@@ -390,3 +393,51 @@ def test_identity_refusals_and_lookups(
             )
         with pytest.raises(ValueError, match="display name"):
             insert_account(connection, display_name="   ")
+
+
+# --- issue #23: a lagging retry walker is refused, not overwritten -----------
+
+
+def test_a_lagging_retry_walker_is_refused_workspace_state_not_overwritten(
+    cluster: ClusterSession, make_workspace: MakeWorkspace
+) -> None:
+    """A concurrent-retry scenario: call ``_record_step`` twice with an intervening
+    ``set_workspace_state(..., state=ACTIVE, expected_states=None)`` from a
+    simulated second walker between them. The first walker's stale write is
+    refused ``workspace_state`` naming the actual state, not silently
+    overwritten — this is the race issue #23 names, closed."""
+    workspace_id = uuid7()
+    with pytest.raises(Injected):
+        make_workspace(
+            workspace_id=workspace_id,
+            after_step=fault_after(STEP_CREATE_DATABASE, []),
+        )
+    assert cluster.registry_row(workspace_id).state is WorkspaceState.PROVISIONING
+
+    # The first (lagging) walker resumes and completes migrate_core.
+    _record_step(cluster.backend, workspace_id, STEP_MIGRATE_CORE)
+    assert cluster.registry_row(workspace_id).state_detail == STEP_MIGRATE_CORE
+
+    # A second walker races ahead of it and activates the workspace directly —
+    # simulating it having already completed every remaining step itself. This
+    # call passes no precondition (``expected_states=None``), exactly like the
+    # pre-#23 behaviour, to construct the race deterministically.
+    with cluster.backend.control_engine.begin() as connection:
+        set_workspace_state(
+            connection,
+            workspace_id,
+            state=WorkspaceState.ACTIVE,
+            state_detail=STEP_ACTIVATE,
+            expected_states=None,
+        )
+
+    # The first walker's next step is now a stale write over an already-active
+    # workspace: refused, naming the actual state, and the row is untouched.
+    with pytest.raises(StorageRefusal) as excinfo:
+        _record_step(cluster.backend, workspace_id, STEP_WRITE_DEFAULT_SETTINGS)
+    assert excinfo.value.state == WORKSPACE_STATE
+    assert excinfo.value.workspace_state == WorkspaceState.ACTIVE.value
+
+    row = cluster.registry_row(workspace_id)
+    assert row.state is WorkspaceState.ACTIVE
+    assert row.state_detail == STEP_ACTIVATE

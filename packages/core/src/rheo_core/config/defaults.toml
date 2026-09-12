@@ -6,7 +6,9 @@
 #
 # That check holds PER MERGE SHA: every later chunk that adds a key adds it to both
 # this file and schema.py, and no run declares a key that only a later run reads. C2
-# (run 0b1) declares exactly the eight keys below. Harness keys (tests/harness/) are
+# (run 0b1) declared the first eight keys below; C6 (run 0b2) added the sixteen
+# routing.* keys under them, and C7a (run 0b2) adds the eight identity.*/internal.*
+# keys below those, so this file carries thirty-two. Harness keys (tests/harness/) are
 # registry-only by design and never appear here.
 
 profile = "development"
@@ -21,3 +23,59 @@ pool_max_connections = 5
 [identity.token_max_days]
 cli = 90
 mcp = 30
+
+# The URL topology (C6). `mode = path` is the single-host arrangement a fresh install
+# produces; the demo overrides scheme and base_host through RHEO__routing__*. The
+# identity surface's fixed_path is an invariant in code, not a key, and routing.modules
+# declares nothing until modules exist.
+[routing]
+mode = "path"
+scheme = "https"
+base_host = "localhost"
+
+[routing.shell]
+host = "circuit"
+path = "/"
+
+[routing.identity]
+host = "auth"
+path = "/auth"
+
+[routing.api]
+host = "api"
+path = "/api"
+
+[routing.mcp]
+host = "mcp"
+path = "/mcp"
+
+[routing.docs]
+host = "docs"
+external = true
+
+[routing.integration]
+host = "tuttle"
+external = true
+reserved = true
+
+# Identity (C7a). Both bools default false: signup and workspace-create are computed
+# from control-plane state (accounts.py), not switched on by this flag alone. The
+# GitHub client id and secret ref default to the empty string, and the provider
+# defaults disabled, so an unconfigured deployment starts up clean (no
+# `secret://env/...` reference to check before an operator writes a real one).
+[identity]
+allow_signup = false
+allow_workspace_create = false
+session_idle_days = 14
+session_max_days = 30
+
+[identity.providers.github]
+enabled = false
+client_id = ""
+client_secret_ref = ""
+
+# The internal listener's shared-secret reference (08). Empty by package default for
+# the same reason as the GitHub client secret above; 11 wires the real
+# `secret://env/RHEO_INTERNAL_SECRET` reference into deployment settings.
+[internal]
+secret_ref = ""

@@ -1,0 +1,25 @@
+[
+  { "mode": "path", "surface": "shell", "path": "/login", "expected": "https://example.test/login" },
+  { "mode": "path", "surface": "shell", "path": "/", "expected": "https://example.test/" },
+  { "mode": "path", "surface": "shell", "path": "/workspaces/switch", "expected": "https://example.test/workspaces/switch" },
+  { "mode": "path", "surface": "identity", "path": "/callback", "expected": "https://example.test/auth/callback" },
+  { "mode": "path", "surface": "identity", "path": "/login", "expected": "https://example.test/auth/login" },
+  { "mode": "path", "surface": "api", "path": "/v1/operations", "expected": "https://example.test/api/v1/operations" },
+  { "mode": "path", "surface": "mcp", "path": "/", "expected": "https://example.test/mcp/" },
+  { "mode": "path", "identity_path": true, "path": "/continue", "expected": "/auth/continue" },
+  { "mode": "path", "identity_path": true, "path": "/logout", "expected": "/auth/logout" },
+  { "mode": "path", "identity_path": true, "path": "/session/workspace", "expected": "/auth/session/workspace" },
+  { "mode": "path", "application_hosts": ["example.test"] },
+
+  { "mode": "subdomain", "surface": "shell", "path": "/login", "expected": "https://circuit.example.test/login" },
+  { "mode": "subdomain", "surface": "shell", "path": "/", "expected": "https://circuit.example.test/" },
+  { "mode": "subdomain", "surface": "shell", "path": "/workspaces/switch", "expected": "https://circuit.example.test/workspaces/switch" },
+  { "mode": "subdomain", "surface": "identity", "path": "/callback", "expected": "https://auth.example.test/auth/callback" },
+  { "mode": "subdomain", "surface": "identity", "path": "/login", "expected": "https://auth.example.test/auth/login" },
+  { "mode": "subdomain", "surface": "api", "path": "/v1/operations", "expected": "https://api.example.test/v1/operations" },
+  { "mode": "subdomain", "surface": "mcp", "path": "/", "expected": "https://mcp.example.test/" },
+  { "mode": "subdomain", "identity_path": true, "path": "/continue", "expected": "/auth/continue" },
+  { "mode": "subdomain", "identity_path": true, "path": "/logout", "expected": "/auth/logout" },
+  { "mode": "subdomain", "identity_path": true, "path": "/session/workspace", "expected": "/auth/session/workspace" },
+  { "mode": "subdomain", "application_hosts": ["auth.example.test", "circuit.example.test"] }
+]

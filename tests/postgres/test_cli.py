@@ -26,6 +26,7 @@ from conftest import ClusterSession
 from rheo_app_cli.main import main
 from rheo_app_core.main import app, lifespan
 from rheo_core.operations import REGISTRY, SETTINGS_SET, WORKSPACE_STATUS
+from rheo_core.operations.core_ops import TOKEN_ISSUE, TOKEN_REVOKE
 from rheo_core.refs import uuid7
 from rheo_core.storage import control_tables
 from rheo_core.storage.control_plane import (
@@ -263,9 +264,13 @@ async def test_lifespan_runs_startup_and_healthz_stays_database_free(
         assert report.profile == "test"
         assert report.control_database == cluster.control_database
         assert "RHEO_CLUSTER_DSN" in report.env_references
+        # Sorted, and now five: C8 (0b2) adds core.token.issue/revoke beside
+        # 0b1's three.
         assert report.operations == (
             SETTINGS_SET,
             "core.settings.set_member",
+            TOKEN_ISSUE,
+            TOKEN_REVOKE,
             WORKSPACE_STATUS,
         )
         by_id = {result.workspace_id: result for result in report.workspaces}

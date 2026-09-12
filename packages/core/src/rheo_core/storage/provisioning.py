@@ -119,14 +119,28 @@ def _registry_row(backend: PostgresBackend, workspace_id: UUID) -> WorkspaceRow:
     return row
 
 
+_RECORD_STEP_EXPECTED_STATES: Final = frozenset(
+    {WorkspaceState.PROVISIONING, WorkspaceState.UNAVAILABLE}
+)
+_ACTIVATE_EXPECTED_STATES: Final = frozenset({WorkspaceState.PROVISIONING})
+
+
 def _record_step(backend: PostgresBackend, workspace_id: UUID, step: str) -> None:
-    """Commit ``state_detail = step`` (state stays ``provisioning``)."""
+    """Commit ``state_detail = step`` (state stays ``provisioning``).
+
+    Guarded by ``expected_states`` (issue #23): the normal walk finds the row
+    ``provisioning``, and ``repair()`` resuming from ``unavailable`` (``:314-315``)
+    finds it there instead — both proceed. A lagging walker that finds the row
+    already ``active`` (another walker got there first) is refused
+    ``workspace_state`` rather than silently stamping ``provisioning`` back over it.
+    """
     with backend.control_engine.begin() as connection:
         control_plane.set_workspace_state(
             connection,
             workspace_id,
             state=WorkspaceState.PROVISIONING,
             state_detail=step,
+            expected_states=_RECORD_STEP_EXPECTED_STATES,
         )
 
 
@@ -225,12 +239,16 @@ def _step_write_default_settings(backend: PostgresBackend, workspace_id: UUID) -
 
 
 def _step_activate(backend: PostgresBackend, workspace_id: UUID) -> None:
+    """By the time either path reaches here, the preceding ``_record_step`` has
+    already moved the row to ``provisioning`` (issue #23): one expected state
+    covers the normal walk and a repair alike."""
     with backend.control_engine.begin() as connection:
         control_plane.set_workspace_state(
             connection,
             workspace_id,
             state=WorkspaceState.ACTIVE,
             state_detail=STEP_ACTIVATE,
+            expected_states=_ACTIVATE_EXPECTED_STATES,
         )
 
 

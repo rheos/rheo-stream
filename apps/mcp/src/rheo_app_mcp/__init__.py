@@ -1,8 +1,10 @@
-"""MCP facade placeholder.
+"""MCP facade (C8, run 0b2): the session resolver and the ``call_tool`` seam.
 
-Imports contracts only. Must never import rheo_core.storage or a DB driver
-(criterion 20) — tests/test_mcp_boundary.py pins this as a static scan.
-The service registry (rheo_core.operations) is a 0c dependency, not 0a's.
+Imports ``rheo_core.boundary``, ``rheo_core.operations`` and ``rheo_core.tokens``
+(the AST scan in ``tests/test_mcp_boundary.py`` pins this allowlist, landed in
+0b2 rather than "later") plus ``rheo_contracts``, and nothing from
+``rheo_core.storage``, ``rheo_core.migrations``, or a DB driver. No transport
+yet: the streamable-HTTP server and the ``mcp`` SDK land in 0c3.
 """
 
 from rheo_contracts import CONTRACT_VERSION

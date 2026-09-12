@@ -542,10 +542,14 @@ version = "0.1.0"
 source = { editable = "apps/mcp" }
 dependencies = [
     { name = "rheo-contracts" },
+    { name = "rheo-core" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "rheo-contracts", editable = "packages/contracts" }]
+requires-dist = [
+    { name = "rheo-contracts", editable = "packages/contracts" },
+    { name = "rheo-core", editable = "packages/core" },
+]
 
 [[package]]
 name = "rheo-app-worker"
@@ -589,6 +593,7 @@ version = "0.1.0"
 source = { editable = "packages/core" }
 dependencies = [
     { name = "alembic" },
+    { name = "httpx" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
     { name = "rheo-contracts" },
@@ -598,6 +603,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.13,<2" },
+    { name = "httpx", specifier = ">=0.27,<1" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.5,<4" },
     { name = "pydantic", specifier = ">=2,<3" },
     { name = "rheo-contracts", editable = "packages/contracts" },
