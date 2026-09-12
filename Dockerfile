@@ -28,7 +28,19 @@ COPY connectors/ ./connectors/
 COPY runtimes/ ./runtimes/
 COPY channels/ ./channels/
 
-RUN uv sync --frozen
+# `uv sync --frozen` installs alembic's own console script (.venv/bin/alembic)
+# as a side effect of resolving the alembic dependency; drop it so the image
+# matches the ratified claim (storage-and-workspaces.md § Migrations): "Alembic's
+# own command is not installed as a console script in the image." The real
+# defence is each env.py refusing to run without the orchestrator's connection;
+# this closes the doc/reality gap around it.
+RUN uv sync --frozen \
+    && rm -f /app/.venv/bin/alembic
+
+# The in-image data root (rheo_core.storage.data_root reads RHEO_IN_CONTAINER to
+# pick it) and the flag that makes that branch live rather than dead code.
+RUN mkdir -p /var/lib/rheo-stream
+ENV RHEO_IN_CONTAINER=1
 
 EXPOSE 8000
 CMD ["uv", "run", "uvicorn", "rheo_app_core.main:app", "--host", "0.0.0.0", "--port", "8000"]

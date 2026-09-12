@@ -2,12 +2,16 @@
 name = "rheo-app-cli"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
-# Dependency-free in 0a: the stub calls nothing yet. Real commands (and their
-# dependency on rheo-core) arrive in 0c.
-dependencies = []
+# The operator command talks to the control plane and the workspace databases
+# through the core packages: the registry, the boundary factories, provisioning
+# and the migration orchestrator. rheo-contracts arrives through rheo-core.
+dependencies = ["rheo-core"]
 
 [project.scripts]
 rheo = "rheo_app_cli.main:main"
+
+[tool.uv.sources]
+rheo-core = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

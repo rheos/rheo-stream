@@ -208,6 +208,20 @@ ships in this phase.
     platform-only import or configuration key. That build is a continuous-integration gate from
     this phase onward, over whatever interface surface exists when it runs. *(Scenario: Fresh
     public clone; FR 48, guardrail 15.)*
+69. Configuration resolves from exactly three sources in a fixed precedence — package
+    defaults, then deployment settings, then workspace and member overrides — and a key that no
+    settings schema declares is refused at every source. For a key the operator's policy floor
+    governs, a workspace override that would relax the deployment value is refused at write time
+    naming the key, and an override already stored is clamped at read time from the moment the
+    deployment value tightens. A test sets one key at each source and asserts the resolved value
+    follows the precedence; writes a floored key looser than the deployment value and asserts the
+    refusal names the key; and tightens the deployment value beneath an existing looser row and
+    asserts the resolved value is the deployment value while the row is left in place.
+    *(Scenario: Hosted workspace data; FR 12, guardrail 25.)*
+
+Criterion numbering is append-only: a criterion added after this plan was ratified takes the
+next unused number across the whole document, which is why 69 sits in phase one after 23, and
+nothing is renumbered, so every existing reference to a criterion number stays valid.
 
 ---
 
@@ -678,7 +692,7 @@ tests part of a requirement, the row says which part and names what is left unte
 | FR 9 | 10, 24 | Composition and schema versions as readable product data. Criterion 10 passes on an empty module set in phase one; criterion 24 is the test of the two module clauses. |
 | FR 10 | 2, 3 | Runtime output outside the tracked tree, and the checkout-local opt-in fully ignored. |
 | FR 11 | 26 | The core storage API is the only route to a connection, no module holds another module's tables, and cross-module change goes through public operations and events. |
-| FR 12 | none in release one | Deliberate. Criterion 6 asserts that a workspace setting cannot supply storage routing or actor identity, which is FR 2 and FR 23, not FR 12. Neither the three-source precedence rules nor the rule that a workspace override cannot relax an operator security policy is tested in release one; both are architecture-specification deliverables (idea-doc question 24). |
+| FR 12 | 69 | The three-source precedence and the operator floor, proved end-to-end through the settings write path: a floored override looser than the deployment value is refused naming the key, and a stored row is clamped on read once the deployment value tightens. Criterion 6 covers the separate rule that a workspace setting cannot supply storage routing or actor identity (FR 2 and FR 23). |
 | FR 13 | 17 | A model credential and the OAuth client secret held by reference, resolved only in the presenting component, and absent from the runtime request, every tool argument, the operation record, and the audit record. The redaction contract for what reaches a model provider is still an architecture-specification deliverable (idea-doc question 12); criterion 17 tests the secret boundary, not redaction of workspace content. |
 | FR 14 | 1, 2 | Fresh clone, synthetic demo, tracked source unchanged. |
 | FR 15 | 11 | Outbox in one transaction, exactly-once delivery after a kill. |

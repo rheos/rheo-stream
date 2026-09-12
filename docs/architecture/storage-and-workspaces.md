@@ -296,7 +296,7 @@ Three sources, in ascending precedence:
 | --- | --- | --- | --- |
 | Package defaults | `packages/core/config/defaults.toml` and each module's `config/defaults.toml` | TOML, tracked | Package authors |
 | Deployment settings | `<data_root>/config/deployment.toml`, then environment variables `RHEO__<section>__<key>` (double underscore as the nesting separator) | TOML, private | The operator |
-| Workspace and member overrides | `core.workspace_setting(key text pk, value text, value_type text, updated_by uuid, updated_at)` and `core.member_setting(account_id, key, value, value_type, updated_at)` | Rows, one per key, typed | An owner (workspace), any member (their own) |
+| Workspace and member overrides | `core.workspace_setting(key text pk, value text, value_type text, updated_by uuid null, updated_at)` (`updated_by` is null when the row is written by provisioning or the operator, neither of which acts as an account) and `core.member_setting(account_id, key, value, value_type, updated_at)` | Rows, one per key, typed | An owner (workspace), any member (their own) |
 
 Every settings key is declared once, in a typed schema (pydantic models generated from the
 defaults files plus a `scope` and `floor` annotation per key). Undeclared keys are rejected at
@@ -333,9 +333,10 @@ export carries them and so that a second member's rows are distinguishable from 
 `core.member_credential(account_id, name text, secret_ref text, created_at)`, holding a reference
 into the secret store and never a value.
 
-FR 12's precedence is untested by a release-one acceptance criterion (the build plan records this);
-the settings schema, the write-time refusal, and the read-time clamp are unit-tested in phase one
-because they ship in phase one.
+FR 12's precedence and the floor are tested by acceptance criterion 69 of the build plan (added
+append-only during phase-one detailed planning): the settings schema, the write-time refusal
+naming the key, and the read-time clamp ship in phase one, and the criterion's test drives them
+end-to-end through the settings write path rather than through the resolver alone.
 
 ## A4. The secret store (FR 13, guardrail 14)
 

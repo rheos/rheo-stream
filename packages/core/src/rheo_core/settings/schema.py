@@ -1,0 +1,446 @@
+"""The declared settings key registry (A5).
+
+Every settings key is declared exactly once, here, as a :class:`KeySpec`: its value
+type, its scope (who may override it), its floor comparator when the operator's policy
+owns it, whether provisioning writes it as an explicit per-workspace row, and its
+package default. ``config/defaults.toml`` repeats the *values* of the production keys
+and nothing else; ``defaults.py`` asserts at import time that the two agree.
+
+Why the default lives on the registry and not only in the TOML: provisioning (C3)
+writes the ``explicit_per_workspace`` rows from package defaults, and the only such key
+in this run is a harness key registered from ``tests/harness/settings_keys.py`` under
+``profile = test``. **Harness keys are registry-only by design**: the TOML holds the
+production keys and the identity check would fail if it held more. So every
+registration carries its default, and for the production keys the registry default and
+the TOML value are the same value in two places, which the identity check also asserts.
+
+This chunk (C2, run 0b1) declares exactly eight production keys. ``routing.*`` (C6),
+the remaining ``identity.*`` and ``internal.secret_ref`` (C7), ``api.cors_origins`` and
+``modules.installed`` (the runs that read them) are not declared here: a key with no
+reader is machinery with no caller, and the registry/TOML identity check holds per
+merge SHA — every later chunk that adds a key adds it to both files.
+
+The text codec (:func:`decode_text` / :func:`encode_text`) also lives here because the
+same encoding serves three readers: environment variables, the ``value text`` column
+of the override rows (C3), and the write path's accepted value.
+"""
+
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Final
+
+
+class Scope(StrEnum):
+    """Who may override a key below the deployment."""
+
+    DEPLOYMENT = "deployment"
+    WORKSPACE = "workspace"
+    MEMBER = "member"
+
+
+class Floor(StrEnum):
+    """The comparator that combines a deployment value with an override.
+
+    The member is named ``AND`` because ``and`` is a keyword; its value is the
+    ratified ``"and"``.
+    """
+
+    MIN = "min"
+    UNION = "union"
+    SUBSET = "subset"
+    AND = "and"
+
+
+class ValueType(StrEnum):
+    """The four supported value types, as text so C3 can store ``value_type``."""
+
+    STR = "str"
+    INT = "int"
+    BOOL = "bool"
+    STR_LIST = "list[str]"
+
+
+SettingValue = str | int | bool | list[str]
+"""A value as callers pass and receive it."""
+
+FrozenValue = str | int | bool | tuple[str, ...]
+"""A value as the registry and the resolved mapping store it: lists become tuples."""
+
+PROFILES: Final[tuple[str, ...]] = ("production", "development", "test")
+PROFILE_KEY: Final = "profile"
+CORE_ORIGIN: Final = "core"
+TEST_HARNESS_ORIGIN: Final = "test_harness"
+
+
+class SettingsError(Exception):
+    """A settings failure raised as an exception. ``state`` names it.
+
+    The write path never raises one of these for a writer's mistake: it returns a
+    :class:`~rheo_core.settings.write_path.SettingRefusal`. These are for the
+    deployment layer (an operator's file or environment is wrong, so startup fails
+    loudly) and for programming errors (a redeclared key, a default of the wrong type).
+    """
+
+    state: str = "settings_error"
+
+    def __init__(self, detail: str, *, key: str | None = None) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.key = key
+
+    def __str__(self) -> str:
+        return self.detail
+
+
+class SettingUndeclared(SettingsError, KeyError):
+    """Also a ``KeyError``, so ``in`` and ``.get()`` on a resolved mapping behave."""
+
+    state = "setting_undeclared"
+
+
+class SettingRedeclared(SettingsError):
+    state = "setting_redeclared"
+
+
+class SettingTypeMismatch(SettingsError):
+    state = "setting_type"
+
+
+class SettingOriginRefused(SettingsError):
+    state = "setting_origin_refused"
+
+
+class SettingsDeclarationMismatch(SettingsError):
+    state = "settings_declaration_mismatch"
+
+
+_KEY_SHAPE = re.compile(r"[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*")
+_FLOOR_TYPES: Final[Mapping[Floor, ValueType]] = {
+    Floor.MIN: ValueType.INT,
+    Floor.UNION: ValueType.STR_LIST,
+    Floor.SUBSET: ValueType.STR_LIST,
+    Floor.AND: ValueType.BOOL,
+}
+_TRUE_WORDS: Final = frozenset({"1", "true", "yes", "on"})
+_FALSE_WORDS: Final = frozenset({"0", "false", "no", "off"})
+
+
+def freeze_value(value: object) -> FrozenValue:
+    """Return ``value`` in its stored form: a list becomes a tuple, all else is as-is.
+
+    Shape checking is :func:`matches_type`'s job; this only removes mutability so a
+    frozen :class:`KeySpec` or a resolved mapping cannot be edited through a list it
+    handed out.
+    """
+    if isinstance(value, list):
+        return tuple(value)
+    if isinstance(value, str | int | bool | tuple):
+        return value
+    raise TypeError(f"unsupported settings value of type {type(value).__name__}")
+
+
+def thaw_value(value: FrozenValue) -> SettingValue:
+    """Return ``value`` in its caller-facing form: a tuple becomes a fresh list."""
+    if isinstance(value, tuple):
+        return list(value)
+    return value
+
+
+def matches_type(value_type: ValueType, value: object) -> bool:
+    """True when ``value`` is a well-formed instance of ``value_type``.
+
+    ``bool`` is checked before ``int`` because ``True`` is an ``int`` in Python and a
+    boolean must not pass as an integer setting (or the reverse).
+    """
+    match value_type:
+        case ValueType.STR:
+            return isinstance(value, str)
+        case ValueType.INT:
+            return isinstance(value, int) and not isinstance(value, bool)
+        case ValueType.BOOL:
+            return isinstance(value, bool)
+        case ValueType.STR_LIST:
+            return isinstance(value, list | tuple) and all(
+                isinstance(item, str) for item in value
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class KeySpec:
+    """One declared settings key.
+
+    ``default`` is mandatory and is the package default (see the module docstring for
+    why it lives here). ``choices`` constrains a ``str`` key to a closed set of values,
+    which is how ``profile`` is held to ``production | development | test``.
+    """
+
+    key: str
+    type: ValueType
+    scope: Scope
+    floor: Floor | None
+    explicit_per_workspace: bool
+    default: FrozenValue
+    choices: tuple[str, ...] | None = None
+
+    def __post_init__(self) -> None:
+        if not _KEY_SHAPE.fullmatch(self.key):
+            raise ValueError(
+                f"settings key {self.key!r} is not dotted lowercase segments"
+            )
+        object.__setattr__(self, "default", freeze_value(self.default))
+        if not matches_type(self.type, self.default):
+            raise TypeError(
+                f"settings key {self.key!r}: default {self.default!r} is not "
+                f"a {self.type.value}"
+            )
+        if self.floor is not None and _FLOOR_TYPES[self.floor] is not self.type:
+            raise TypeError(
+                f"settings key {self.key!r}: floor {self.floor.value!r} applies to "
+                f"{_FLOOR_TYPES[self.floor].value} keys, not {self.type.value}"
+            )
+        if self.choices is not None:
+            if self.type is not ValueType.STR:
+                raise TypeError(
+                    f"settings key {self.key!r}: choices apply to str keys only"
+                )
+            if self.default not in self.choices:
+                raise ValueError(
+                    f"settings key {self.key!r}: default {self.default!r} is not "
+                    f"one of {list(self.choices)}"
+                )
+
+
+def check_value(spec: KeySpec, value: object, *, source: str) -> FrozenValue:
+    """Type-check a natively typed value (TOML, a write) against ``spec``.
+
+    Raises :class:`SettingTypeMismatch` naming the key and ``source`` otherwise.
+    """
+    if not matches_type(spec.type, value):
+        raise SettingTypeMismatch(
+            f"{spec.key}: {source} holds a value of type {type(value).__name__}, "
+            f"declared type is {spec.type.value}",
+            key=spec.key,
+        )
+    frozen = freeze_value(value)
+    if spec.choices is not None and frozen not in spec.choices:
+        raise SettingTypeMismatch(
+            f"{spec.key}: {source} holds {frozen!r}, which is not one of "
+            f"{list(spec.choices)}",
+            key=spec.key,
+        )
+    return frozen
+
+
+def decode_text(spec: KeySpec, text: str, *, source: str) -> FrozenValue:
+    """Coerce a text value (an environment variable, an override row) by ``spec.type``.
+
+    Integers are decimal; booleans accept ``true/false``, ``1/0``, ``yes/no``,
+    ``on/off`` case-insensitively; ``list[str]`` is comma-separated with items
+    stripped and empty items dropped, so the empty string is the empty list. A value
+    that will not coerce raises :class:`SettingTypeMismatch` naming the key and
+    ``source`` (the variable name or the row), never echoing the text itself, because
+    a mistyped setting can be a pasted secret.
+    """
+    value: FrozenValue
+    match spec.type:
+        case ValueType.STR:
+            value = text
+        case ValueType.INT:
+            try:
+                value = int(text.strip())
+            except ValueError:
+                raise SettingTypeMismatch(
+                    f"{spec.key}: {source} is not an integer", key=spec.key
+                ) from None
+        case ValueType.BOOL:
+            word = text.strip().lower()
+            if word in _TRUE_WORDS:
+                value = True
+            elif word in _FALSE_WORDS:
+                value = False
+            else:
+                raise SettingTypeMismatch(
+                    f"{spec.key}: {source} is not a boolean", key=spec.key
+                )
+        case ValueType.STR_LIST:
+            value = tuple(item.strip() for item in text.split(",") if item.strip())
+    if spec.choices is not None and value not in spec.choices:
+        raise SettingTypeMismatch(
+            f"{spec.key}: {source} is not one of {list(spec.choices)}", key=spec.key
+        )
+    return value
+
+
+def encode_text(spec: KeySpec, value: FrozenValue | SettingValue) -> str:
+    """The inverse of :func:`decode_text`: the text form C3 stores in ``value``."""
+    match spec.type:
+        case ValueType.STR:
+            return str(value)
+        case ValueType.INT:
+            return str(int(value))  # type: ignore[arg-type]
+        case ValueType.BOOL:
+            return "true" if value else "false"
+        case ValueType.STR_LIST:
+            if not isinstance(value, list | tuple):
+                raise TypeError(f"{spec.key}: expected a list of str")
+            return ",".join(value)
+
+
+class SettingsRegistry:
+    """The process-wide declaration table.
+
+    Registration is idempotent per key: registering the identical spec under the same
+    origin again is a no-op, and a different spec (or origin) for a declared key raises
+    :class:`SettingRedeclared`. ``origin = "test_harness"`` is accepted only when the
+    resolved ``profile`` is ``test``; production keys register with ``origin =
+    "core"``.
+    """
+
+    def __init__(self) -> None:
+        self._specs: dict[str, KeySpec] = {}
+        self._origins: dict[str, str] = {}
+
+    def register(self, spec: KeySpec, *, origin: str) -> None:
+        if not origin:
+            raise ValueError("a settings registration needs a non-empty origin")
+        if origin == TEST_HARNESS_ORIGIN:
+            # deployment.py imports this module, so the profile lookup is imported
+            # here, at call time, rather than at the top of the file.
+            from rheo_core.settings.deployment import current_profile
+
+            profile = current_profile()
+            if profile != "test":
+                raise SettingOriginRefused(
+                    f"{spec.key}: origin {origin!r} is accepted only under "
+                    f"profile = test (resolved profile is {profile!r})",
+                    key=spec.key,
+                )
+        existing = self._specs.get(spec.key)
+        if existing is not None:
+            if existing == spec and self._origins[spec.key] == origin:
+                return
+            raise SettingRedeclared(
+                f"{spec.key} is already declared (origin "
+                f"{self._origins[spec.key]!r}) with a different spec or origin",
+                key=spec.key,
+            )
+        self._specs[spec.key] = spec
+        self._origins[spec.key] = origin
+
+    def lookup(self, key: str) -> KeySpec | None:
+        return self._specs.get(key)
+
+    def get(self, key: str) -> KeySpec:
+        spec = self._specs.get(key)
+        if spec is None:
+            raise SettingUndeclared(f"{key} is not a declared settings key", key=key)
+        return spec
+
+    def origin_of(self, key: str) -> str:
+        self.get(key)
+        return self._origins[key]
+
+    def keys(self, *, origin: str | None = None) -> frozenset[str]:
+        if origin is None:
+            return frozenset(self._specs)
+        return frozenset(k for k, o in self._origins.items() if o == origin)
+
+    def specs(self, *, origin: str | None = None) -> tuple[KeySpec, ...]:
+        return tuple(self._specs[k] for k in sorted(self.keys(origin=origin)))
+
+    def explicit_per_workspace(self) -> tuple[KeySpec, ...]:
+        """The keys provisioning writes as rows from their package default (C3)."""
+        return tuple(s for s in self.specs() if s.explicit_per_workspace)
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._specs
+
+
+PRODUCTION_KEYS: Final[tuple[KeySpec, ...]] = (
+    KeySpec(
+        key="storage.cluster_dsn_ref",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="secret://env/RHEO_CLUSTER_DSN",
+    ),
+    KeySpec(
+        key="storage.control_database",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="rheo_control",
+    ),
+    # The ratified default (storage-and-workspaces.md § Extensions and the application
+    # role): an operator who needs pre-installed extensions points this at their own
+    # template database.
+    KeySpec(
+        key="storage.template_database",
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="template1",
+    ),
+    KeySpec(
+        key="storage.pool_cache_size",
+        type=ValueType.INT,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default=32,
+    ),
+    KeySpec(
+        key="storage.pool_max_connections",
+        type=ValueType.INT,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default=5,
+    ),
+    KeySpec(
+        key=PROFILE_KEY,
+        type=ValueType.STR,
+        scope=Scope.DEPLOYMENT,
+        floor=None,
+        explicit_per_workspace=False,
+        default="development",
+        choices=PROFILES,
+    ),
+    # The two token_max_days keys are the only floored production keys in the design
+    # and criterion 69 needs one; nothing in 0b1 reads them except that test.
+    KeySpec(
+        key="identity.token_max_days.cli",
+        type=ValueType.INT,
+        scope=Scope.WORKSPACE,
+        floor=Floor.MIN,
+        explicit_per_workspace=False,
+        default=90,
+    ),
+    KeySpec(
+        key="identity.token_max_days.mcp",
+        type=ValueType.INT,
+        scope=Scope.WORKSPACE,
+        floor=Floor.MIN,
+        explicit_per_workspace=False,
+        default=30,
+    ),
+)
+
+REGISTRY: Final = SettingsRegistry()
+for _spec in PRODUCTION_KEYS:
+    REGISTRY.register(_spec, origin=CORE_ORIGIN)
+
+
+def register(spec: KeySpec, *, origin: str) -> None:
+    """Declare a key on the process-wide registry; see ``SettingsRegistry.register``."""
+    REGISTRY.register(spec, origin=origin)
+
+
+def spec_for(key: str) -> KeySpec:
+    """The declaration for ``key``, or :class:`SettingUndeclared`."""
+    return REGISTRY.get(key)

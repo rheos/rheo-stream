@@ -34,6 +34,10 @@ def _artifact_relpaths(token: str) -> "tuple[str, ...]":
         f".rheo-local/exports/{token}/workspace.csv",
         f".rheo-local/backups/{token}.sql",
         f".rheo-local/memory/{token}/index.bin",
+        # 0b1: the operator config file and the file secret backend's cluster
+        # secret, both checkout-local.
+        f".rheo-local/config/{token}/deployment.toml",
+        f".rheo-local/secrets/{token}/cluster/primary-dsn",
     )
 
 
@@ -52,13 +56,26 @@ def rheo_local_artifacts() -> "list[str]":
     relpaths = _artifact_relpaths(token)
     rheo_local = _REPO_ROOT / ".rheo-local"
     preexisting = rheo_local.exists()
-    created: list[Path] = []
+    # Enforce the module docstring's own rule before writing anything, in a pass
+    # over every path that writes nothing: a fixed literal path here would
+    # overwrite (then delete) real data at that path if it already existed.
+    # Validating inside the write loop below would let an earlier iteration's
+    # write stand uncleaned if a later path failed this check, since that write
+    # would happen before the try/finally starts. Nothing else in this suite or
+    # in check_repository.py checks this — it is otherwise pure discipline.
     for relative in relpaths:
-        path = _REPO_ROOT / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("test artifact\n", encoding="utf-8")
-        created.append(path)
+        assert token in relative, (
+            f"fixture path {relative!r} does not carry the per-run token "
+            f"{token!r}; a fixed literal path here risks silently destroying "
+            "real .rheo-local/ data at that path"
+        )
+    created: list[Path] = []
     try:
+        for relative in relpaths:
+            path = _REPO_ROOT / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("test artifact\n", encoding="utf-8")
+            created.append(path)
         yield list(relpaths)
     finally:
         for path in created:
@@ -70,10 +87,17 @@ def rheo_local_artifacts() -> "list[str]":
         else:
             # .rheo-local already held (possibly real) data: remove only the unique
             # per-run token dirs this test created, never a shared family path.
+            # Walk each relative path's own directories (not just the immediate
+            # parent) for the first one named after the token, so a nested shape
+            # like ``secrets/<token>/cluster/primary-dsn`` is cleaned up from the
+            # token directory down, not left as an orphaned ``cluster/`` dir.
             for relative in relpaths:
-                token_dir = (_REPO_ROOT / relative).parent
-                if token in token_dir.name:
-                    shutil.rmtree(token_dir, ignore_errors=True)
+                ancestor = (_REPO_ROOT / relative).parent
+                while ancestor != _REPO_ROOT:
+                    if token in ancestor.name:
+                        shutil.rmtree(ancestor, ignore_errors=True)
+                        break
+                    ancestor = ancestor.parent
 
 
 def test_checkout_local_artifacts_are_ignored(

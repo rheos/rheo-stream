@@ -765,7 +765,7 @@ means it is an architecture-specification obligation; **L** means a named later 
 | 22. The core has no profession-specific rules | R | FR 44, and the core surface named in question 20's disposition |
 | 23. Module removal is a supported workflow | L | Module-lifecycle milestone, per D5 |
 | 24. Shared business records do not require Leads | R | FR 40 |
-| 25. Personalization is private data | R + A | FR 13 and FR 50 carry criteria; FR 12 is stated as a requirement but its precedence rules are untested in release one and are an architecture-specification deliverable (idea-doc question 24) |
+| 25. Personalization is private data | R + A | FR 13 and FR 50 carry criteria; FR 12's precedence rules and the operator's policy floor are tested by criterion 69 of the build plan (added append-only during phase-one detailed planning); the mechanism remains an architecture-specification deliverable |
 | 26. Runtime output stays outside the source tree by default | R | FR 10, FR 11 |
 
 ## What this document does not decide

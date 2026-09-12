@@ -9,7 +9,9 @@ from the before-set — NOT that either capture is empty. The working tree can s
 dirty on this branch (a pre-existing uncommitted doc change, and the run tail runs in
 a worktree off main), so a global "clean" assertion would false-fail.
 
-Docker/compose stay out of ``uv run pytest`` (spec.md Technical Risks, risk 6); the
+From run 0b1 on, ``uv run pytest`` needs a reachable Postgres and **fails fast**
+(``tests/conftest.py``, ``pytest.exit``) rather than skipping when the cluster is
+unreachable — a skipped ``postgres`` marker would pass this gate vacuously. The
 same "writes nothing to the tracked tree" property is proved end-to-end — Postgres
 and the container build included — by ``make demo``.
 """
@@ -42,7 +44,7 @@ async def _exercise_startup() -> None:
     ) as client:
         response = await client.get("/healthz")
     assert response.status_code == 200
-    cli_main()
+    cli_main([])
 
 
 async def test_startup_writes_nothing_new_to_tracked_tree() -> None:

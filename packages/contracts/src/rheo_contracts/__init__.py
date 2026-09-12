@@ -2,7 +2,59 @@
 
 Holds the manifest model, ``WorkspaceContext`` type, safety classes, the event and
 observation envelopes, the runtime contract types, the shared repository protocols, and
-the record-reference type. Populated by 0b/0c; this scaffold defines only the version.
+the record-reference type. The envelopes, runtime types and repository protocols are
+still scaffolds; 0b1 populates the context, safety, reference and declaration types.
+
+This distribution may import only the standard library, ``pydantic`` and itself. The
+scan in ``tests/test_imports.py`` enforces that, and it is the reason the operation
+handler is not a field on :class:`~rheo_contracts.manifest.OperationDeclaration`.
 """
 
+from rheo_contracts.context import (
+    ALL_OPERATIONS,
+    Actor,
+    ActorKind,
+    AllOperations,
+    Audience,
+    AudienceKind,
+    Entry,
+    Role,
+    WorkspaceContext,
+)
+from rheo_contracts.manifest import (
+    RESERVED_INPUT_FIELDS,
+    AuditSpec,
+    Idempotency,
+    OperationDeclaration,
+)
+from rheo_contracts.refs import (
+    RESERVED_MODULE_SEGMENT,
+    RecordRef,
+    RecordRefMalformed,
+    is_reserved_module,
+)
+from rheo_contracts.safety import SafetyClass
+
 CONTRACT_VERSION = 1
+
+__all__ = [
+    "ALL_OPERATIONS",
+    "CONTRACT_VERSION",
+    "RESERVED_INPUT_FIELDS",
+    "RESERVED_MODULE_SEGMENT",
+    "Actor",
+    "ActorKind",
+    "AllOperations",
+    "AuditSpec",
+    "Audience",
+    "AudienceKind",
+    "Entry",
+    "Idempotency",
+    "OperationDeclaration",
+    "RecordRef",
+    "RecordRefMalformed",
+    "Role",
+    "SafetyClass",
+    "WorkspaceContext",
+    "is_reserved_module",
+]

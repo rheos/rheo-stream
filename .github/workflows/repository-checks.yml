@@ -25,6 +25,21 @@ jobs:
     name: Python checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: rheo
+          POSTGRES_PASSWORD: rheo_dev_only
+          POSTGRES_DB: rheo
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U rheo" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # Deliberately NOT RHEO_CLUSTER_DSN: tests/conftest.py derives it from
+      # RHEO_TEST_CLUSTER_DSN so the suite reaches the cluster through the
+      # production settings->secret-scope path, not an injected DSN.
+      RHEO_TEST_CLUSTER_DSN: postgresql://rheo:rheo_dev_only@localhost:5432/postgres
+      RHEO_PROFILE: test
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6

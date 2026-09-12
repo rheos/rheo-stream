@@ -1,8 +1,10 @@
-# Local dev stack for run 0a: a Postgres with pgvector + pg_trgm available, and
-# the hello-world `core` image. No `web` service — 0a runs the web shell under
-# `next start` outside compose (spec.md W1); `make demo` orchestrates that.
-# Credentials here are dev-only, non-secret placeholders — this is a local compose
-# file, not a secret-store entry (that seam is 0b / A4).
+# Local dev stack, extended in run 0b1: a Postgres with pgvector + pg_trgm
+# available, and the `core` image, which now makes a real database call at
+# startup (rheo_app_core.startup.run_startup, from the FastAPI lifespan) — the
+# control-chain migration and per-workspace migrations. No `web` service — 0a
+# runs the web shell under `next start` outside compose (spec.md W1); `make demo`
+# orchestrates that. Credentials here are dev-only, non-secret placeholders —
+# this is a local compose file, not a secret-store entry (that seam is 0b / A4).
 name: rheo-stream
 
 services:
@@ -12,8 +14,11 @@ services:
       POSTGRES_USER: rheo
       POSTGRES_PASSWORD: rheo_dev_only
       POSTGRES_DB: rheo
+    # Host port is parameterised so a developer whose 5432 is already bound by an
+    # unrelated project can run this stack without touching that container. The
+    # default is the literal previous value, so a fresh clone is unchanged.
     ports:
-      - "5432:5432"
+      - "${RHEO_PG_PORT:-5432}:5432"
     # Data on a named Docker volume, never a bind mount into the repo, so
     # `make up`/`make demo` write nothing into the tracked tree (criterion 2).
     volumes:
@@ -31,10 +36,31 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+    # Host port is parameterised for the same reason as postgres's: an unrelated
+    # process on this machine may already hold 8000. The container always
+    # listens on 8000 internally; only the host-side publish moves.
     ports:
-      - "8000:8000"
-    # No `depends_on: postgres` — `core` makes no database connection in 0a
-    # (spec.md System Components), so there is no DB call to order against.
+      - "${RHEO_CORE_PORT:-8000}:8000"
+    # `core` now makes a real database call in its lifespan (the control-chain
+    # migration), so it must wait for postgres to be accepting connections, not
+    # merely for the container to have started.
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Compose-network DSN: `postgres` is the service's DNS name on the compose
+      # network, always port 5432 there regardless of the host-side RHEO_PG_PORT
+      # remap (that remap is host-port-only; nothing on the compose network reads
+      # RHEO_PG_PORT).
+      RHEO_CLUSTER_DSN: postgresql://rheo:rheo_dev_only@postgres:5432/postgres
+      RHEO_DATA_ROOT: /var/lib/rheo-stream
+      RHEO_IN_CONTAINER: "1"
+      RHEO_PROFILE: development
+    volumes:
+      # Named volume, never a bind mount into the repo, so `make up`/`make demo`
+      # write nothing into the tracked tree (criterion 2) — same rule as pgdata.
+      - rheodata:/var/lib/rheo-stream
 
 volumes:
   pgdata:
+  rheodata:

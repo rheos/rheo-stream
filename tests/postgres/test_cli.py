@@ -1,0 +1,310 @@
+"""The ``rheo`` operator command through ``main(argv)``, and the ``core`` process's
+startup sequence through the FastAPI lifespan.
+
+- ``main([])`` returns ``0`` and prints usage; ``--help`` returns ``0``; a usage
+  error returns ``2`` — never a ``SystemExit`` out of ``main``.
+- ``account create`` writes one ``account`` row and its ``identity`` row and prints
+  **exactly the new id and a newline** to stdout; a duplicate identity is refused
+  ``identity_exists`` on stderr with no second account row.
+- A fresh control plane must run ``account create`` before ``workspace create
+  --owner``: the owner membership is a foreign key to ``account``, so the create
+  with an unknown owner is refused ``account_missing`` and leaves no registry row.
+- ``workspace create`` prints exactly the id; ``list``, ``status`` (JSON through the
+  registry under an operator context), ``repair``, ``migrate`` and ``doctor``
+  return ``0``; a refusal prints its state name on stderr and returns ``1``.
+- The lifespan runs startup (control chain, active workspaces, the registry) and
+  ``/healthz`` answers inside it with no database call of its own.
+"""
+
+import json
+from collections.abc import Iterator
+from uuid import UUID
+
+import httpx
+import pytest
+from conftest import ClusterSession
+from rheo_app_cli.main import main
+from rheo_app_core.main import app, lifespan
+from rheo_core.operations import REGISTRY, SETTINGS_SET, WORKSPACE_STATUS
+from rheo_core.refs import uuid7
+from rheo_core.storage import control_tables
+from rheo_core.storage.control_plane import (
+    get_account,
+    get_identity,
+    get_membership,
+    list_workspaces,
+)
+from rheo_core.storage.control_tables import WorkspaceState
+from rheo_core.storage.postgres import get_backend
+from rheo_core.storage.provisioning import database_name_for
+from sqlalchemy import event, func, select
+
+pytestmark = pytest.mark.postgres
+
+Run = tuple[int, str, str]
+
+
+def _run(capsys: pytest.CaptureFixture[str], *argv: str) -> Run:
+    capsys.readouterr()
+    code = main(list(argv))
+    out, err = capsys.readouterr()
+    return code, out, err
+
+
+def _count_accounts(cluster: ClusterSession) -> int:
+    with cluster.backend.control_engine.connect() as connection:
+        return int(
+            connection.execute(
+                select(func.count()).select_from(control_tables.account)
+            ).scalar_one()
+        )
+
+
+def _workspace_ids(cluster: ClusterSession) -> set[UUID]:
+    with cluster.backend.control_engine.connect() as connection:
+        return {row.id for row in list_workspaces(connection)}
+
+
+@pytest.fixture
+def created_workspaces(cluster: ClusterSession) -> Iterator[None]:
+    """Record every workspace database the commands under test create, so the
+    session teardown drops them (the CLI mints the ids, so this runs afterwards)."""
+    before = _workspace_ids(cluster)
+    yield
+    for workspace_id in _workspace_ids(cluster) - before:
+        cluster.record(database_name_for(workspace_id))
+
+
+# --- the entry contract ---------------------------------------------------------------
+
+
+def test_no_subcommand_prints_usage_and_returns_zero(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code, out, err = _run(capsys)
+    assert code == 0
+    assert out.startswith("usage: rheo")
+    assert err == ""
+
+
+def test_help_and_usage_errors_return_instead_of_exiting(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code, out, _ = _run(capsys, "--help")
+    assert code == 0 and "usage: rheo" in out
+    code, out, err = _run(capsys, "no-such-command")
+    assert code == 2 and out == "" and "usage: rheo" in err
+    code, out, err = _run(capsys, "workspace")
+    assert code == 2 and out == "" and "usage" in err
+    code, out, err = _run(capsys, "workspace", "create")
+    assert code == 2 and out == "" and "--owner" in err
+    code, out, err = _run(capsys, "workspace", "status", "not-a-uuid")
+    assert code == 2 and out == ""
+
+
+# --- account create, then workspace create --owner ------------------------------------
+
+
+def test_account_create_prints_exactly_the_id_and_writes_both_rows(
+    cluster: ClusterSession, capsys: pytest.CaptureFixture[str]
+) -> None:
+    subject = f"subject-{uuid7().hex[:12]}"
+    code, out, err = _run(
+        capsys,
+        "account", "create",
+        "--provider", "github",
+        "--subject", subject,
+        "--display-name", "owner-one",
+    )  # fmt: skip
+    assert code == 0, err
+    assert out.endswith("\n") and out.count("\n") == 1
+    account_id = UUID(out.strip())
+    assert out == f"{account_id}\n"
+    assert "created" in err
+
+    with cluster.backend.control_engine.connect() as connection:
+        account = get_account(connection, account_id)
+        identity = get_identity(
+            connection, provider_id="github", provider_subject=subject
+        )
+    assert account is not None and account.display_name == "owner-one"
+    assert identity is not None and identity.account_id == account_id
+    assert identity.email is None and identity.email_verified is False
+
+    # The same identity again: refused, and no second account row is left behind.
+    count = _count_accounts(cluster)
+    code, out, err = _run(
+        capsys,
+        "account", "create",
+        "--provider", "github",
+        "--subject", subject,
+        "--display-name", "owner-again",
+    )  # fmt: skip
+    assert code == 1 and out == ""
+    assert "identity_exists" in err
+    assert _count_accounts(cluster) == count
+
+
+def test_a_fresh_control_plane_needs_account_create_before_workspace_create(
+    cluster: ClusterSession,
+    capsys: pytest.CaptureFixture[str],
+    created_workspaces: None,
+) -> None:
+    workspaces_before = _workspace_ids(cluster)
+    code, out, err = _run(capsys, "workspace", "create", "--owner", str(uuid7()))
+    assert code == 1 and out == ""
+    assert "account_missing" in err
+    assert _workspace_ids(cluster) == workspaces_before
+
+    code, out, err = _run(
+        capsys,
+        "account", "create",
+        "--provider", "github",
+        "--subject", f"subject-{uuid7().hex[:12]}",
+        "--display-name", "owner-one",
+    )  # fmt: skip
+    assert code == 0, err
+    owner = UUID(out.strip())
+
+    code, out, err = _run(
+        capsys, "workspace", "create", "--owner", str(owner), "--slug", "demo-one"
+    )
+    assert code == 0, err
+    assert out.endswith("\n") and out.count("\n") == 1
+    workspace_id = UUID(out.strip())
+    assert out == f"{workspace_id}\n"
+    row = cluster.registry_row(workspace_id)
+    assert row.state is WorkspaceState.ACTIVE
+    assert row.slug == "demo-one"
+    assert row.database_name == database_name_for(workspace_id)
+    assert cluster.backend.database_exists(row.database_name)
+    with cluster.backend.control_engine.connect() as connection:
+        membership = get_membership(
+            connection, account_id=owner, workspace_id=workspace_id
+        )
+    assert membership is not None and membership.role.value == "owner"
+
+    # A second create for the same owner: a second id, a second database.
+    code, out, err = _run(capsys, "workspace", "create", "--owner", str(owner))
+    assert code == 0, err
+    second = UUID(out.strip())
+    assert second != workspace_id
+    assert cluster.registry_row(second).state is WorkspaceState.ACTIVE
+
+    # list, status, repair on what was just created.
+    code, out, err = _run(capsys, "workspace", "list")
+    assert code == 0
+    lines = {line.split("\t")[0]: line for line in out.splitlines()}
+    assert (
+        str(workspace_id) in lines
+        and "\tdemo-one\tactive\t" in lines[str(workspace_id)]
+    )
+    assert str(second) in lines
+
+    code, out, err = _run(capsys, "workspace", "status", str(workspace_id))
+    assert code == 0, err
+    status = json.loads(out)
+    assert status["core_contract_version"] == 1
+    assert status["modules"] == []
+    assert isinstance(status["core_version"], str) and status["core_version"]
+    assert REGISTRY.lookup(WORKSPACE_STATUS) is not None
+    assert REGISTRY.lookup(SETTINGS_SET) is not None
+
+    code, out, err = _run(capsys, "workspace", "repair", str(workspace_id))
+    assert code == 0 and out == ""
+    assert cluster.registry_row(workspace_id).state is WorkspaceState.ACTIVE
+
+    # A refusal prints its state name on stderr and returns 1.
+    unknown = uuid7()
+    code, out, err = _run(capsys, "workspace", "status", str(unknown))
+    assert code == 1 and out == "" and "workspace_unavailable" in err
+    code, out, err = _run(capsys, "workspace", "repair", str(unknown))
+    assert code == 1 and out == "" and "workspace_missing" in err
+
+
+def test_migrate_and_doctor_return_zero(
+    cluster: ClusterSession, capsys: pytest.CaptureFixture[str], workspace: UUID
+) -> None:
+    code, out, err = _run(capsys, "migrate")
+    assert code == 0, err
+    assert out == ""
+    assert cluster.control_database in err
+    assert f"workspace {workspace}" in err
+    assert cluster.registry_row(workspace).state is WorkspaceState.ACTIVE
+
+    code, out, err = _run(capsys, "doctor")
+    assert code == 0, (out, err)
+    report = out.splitlines()
+    assert any(line.startswith("ok   data root:") for line in report), report
+    assert any(line.startswith("ok   settings: profile test") for line in report)
+    assert any(line.startswith("ok   cluster: reachable") for line in report)
+    assert any(
+        line.startswith(f"ok   control plane {cluster.control_database}: at revision")
+        for line in report
+    )
+    assert any(
+        f"workspace {workspace}" in line and ": active" in line for line in report
+    )
+    for extension in ("vector", "pg_trgm"):
+        (line,) = [line for line in report if f"extension {extension}:" in line]
+        assert "role may CREATE EXTENSION in" in line
+        assert "trusted:" in line
+    assert not any(line.startswith("FAIL") for line in report)
+
+
+# --- the core process startup sequence -----------------------------------------------
+
+
+async def test_lifespan_runs_startup_and_healthz_stays_database_free(
+    cluster: ClusterSession, workspace: UUID
+) -> None:
+    async with lifespan(app):
+        report = app.state.startup
+        assert report.profile == "test"
+        assert report.control_database == cluster.control_database
+        assert "RHEO_CLUSTER_DSN" in report.env_references
+        assert report.operations == (
+            SETTINGS_SET,
+            "core.settings.set_member",
+            WORKSPACE_STATUS,
+        )
+        by_id = {result.workspace_id: result for result in report.workspaces}
+        assert by_id[workspace].ok is True
+        # /healthz makes no database call: capture every statement on the control
+        # engine and on this workspace's engine while it answers.
+        database_name = cluster.registry_row(workspace).database_name
+        engines = (
+            cluster.backend.control_engine,
+            cluster.backend.pools.engine_for(database_name),
+        )
+        captured: list[str] = []
+
+        def capture(
+            conn: object,
+            cursor: object,
+            statement: str,
+            parameters: object,
+            context: object,
+            executemany: bool,
+        ) -> None:
+            captured.append(statement)
+
+        for engine in engines:
+            event.listen(engine, "before_cursor_execute", capture)
+        try:
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://t"
+            ) as client:
+                response = await client.get("/healthz")
+        finally:
+            for engine in engines:
+                event.remove(engine, "before_cursor_execute", capture)
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok", "contract_version": 1}
+        assert captured == []
+    # Shutdown disposed the engines and left the backend bound: the session's
+    # backend is still the process-wide one, and its engines recreate on use.
+    assert get_backend() is cluster.backend
+    assert get_backend().control_database == cluster.control_database
+    assert cluster.registry_row(workspace).state is WorkspaceState.ACTIVE
