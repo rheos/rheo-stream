@@ -26,7 +26,7 @@ from fastapi import FastAPI
 from rheo_contracts import CONTRACT_VERSION
 from rheo_core.storage.postgres import get_backend
 
-from rheo_app_core import auth_routes
+from rheo_app_core import api_routes, auth_routes
 from rheo_app_core.internal_app import internal_app as internal_app
 from rheo_app_core.startup import run_startup
 
@@ -64,6 +64,7 @@ seams) — pick ``public_app`` in any new code, ``app`` only where an existing
 0a-owned test file already imports it."""
 
 public_app.include_router(auth_routes.router)
+public_app.include_router(api_routes.router)
 
 
 @app.get("/healthz")

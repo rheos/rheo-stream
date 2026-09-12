@@ -2,14 +2,19 @@
 name = "rheo-app-mcp"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
-# Contracts only. No rheo-core dependency in 0a: there is no service registry to
-# call yet, and the narrowest possible dependency set is what makes
-# tests/test_mcp_boundary.py a meaningful boundary check rather than a vacuous one
-# (criterion 20). The registry (rheo_core.operations) becomes a dependency in 0c.
-dependencies = ["rheo-contracts"]
+# rheo-core lands as a dependency in 0b2 (C8), not 0c: the facade's session
+# resolver (context_from_token, over rheo_core.boundary) and its two
+# registered tools (over rheo_core.operations and rheo_core.tokens) both need
+# it. tests/test_mcp_boundary.py's AST scan keeps this narrower than a plain
+# dependency listing would suggest -- it allows only rheo_core.boundary,
+# rheo_core.operations and rheo_core.tokens (plus rheo_contracts), still
+# denying rheo_core.storage, rheo_core.migrations and any DB driver, so
+# criterion 20 stays meaningful rather than vacuous.
+dependencies = ["rheo-contracts", "rheo-core"]
 
 [tool.uv.sources]
 rheo-contracts = { workspace = true }
+rheo-core = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
