@@ -2,13 +2,16 @@
 presentation surfaces, and the row-count-snapshot proof of "no partial
 effect" (B6, B7).
 
-Seams under test: ``core.token.issue``/``rheo_core.boundary.factories.
-context_from_token`` (the full mint -> snapshot -> present -> refuse path),
-the operator-role authorization on ``core.token.issue``/``revoke`` (a ``rheo
-token issue`` regression -- proved by driving the real,
-``context_for_operator`` -> ``registry.authorize`` -> ``dispatch`` path, not a
-bypassing handler call), ``sets.py``'s ``agent_default`` against its own
-``REGISTERED_TOOLS``, and the presentation refusal chain's exact order.
+Seams under test: ``core.token.issue``/``core.token.revoke``/
+``rheo_core.boundary.factories.context_from_token`` (the full mint ->
+snapshot -> present -> refuse path, and revoke's own mint -> revoke ->
+present-refuses path), the operator-role authorization on both operations (a
+``rheo token issue``/``rheo token revoke`` regression -- proved by driving
+the real, ``context_for_operator`` -> ``registry.authorize`` -> ``dispatch``
+path for each, not a bypassing handler call), the "member for self, operator
+for another account" ownership rule on revoke, ``sets.py``'s ``agent_default``
+against its own ``REGISTERED_TOOLS``, and the presentation refusal chain's
+exact order.
 """
 
 import hashlib
@@ -17,8 +20,8 @@ from uuid import UUID
 
 import pytest
 from conftest import ClusterSession
-from harness.registry import NOTE_GET, register_harness
-from rheo_contracts import WorkspaceContext
+from harness.registry import NOTE_GET, add_member, register_harness
+from rheo_contracts import Role, WorkspaceContext
 from rheo_core.boundary import context_for_operator
 from rheo_core.boundary.context import (
     MEMBERSHIP_MISSING,
@@ -37,13 +40,15 @@ from rheo_core.operations import (
     dispatch,
     register_core_operations,
 )
-from rheo_core.operations.core_ops import TOKEN_ISSUE
+from rheo_core.operations.core_ops import TOKEN_ISSUE, TOKEN_REVOKE
+from rheo_core.refs.resolver import NOT_FOUND
 from rheo_core.sessions import create_session, mint_host_secret, switch_workspace
 from rheo_core.storage import control_tables as t
 from rheo_core.storage import core_tables
 from rheo_core.storage.backend import UnitOfWork
 from rheo_core.storage.control_plane import (
     WorkspaceRow,
+    get_access_token,
     insert_access_token,
     insert_access_token_operations,
     list_access_token_operations,
@@ -51,7 +56,11 @@ from rheo_core.storage.control_plane import (
 )
 from rheo_core.storage.control_tables import WorkspaceState
 from rheo_core.tokens.format import mint
-from rheo_core.tokens.issue import SET_NOT_ISSUABLE
+from rheo_core.tokens.issue import (
+    ACCOUNT_REQUIRED,
+    SET_NOT_ISSUABLE,
+    SET_SELECTION_INVALID,
+)
 from rheo_core.tokens.policy import NON_TOKEN_ISSUABLE
 from rheo_core.tokens.sets import agent_default, cli_full
 from sqlalchemy import func, select, update
@@ -68,18 +77,24 @@ def registrations() -> None:
     register_harness()
 
 
+def _session_ctx_for(workspace_id: UUID, account_id: UUID) -> WorkspaceContext:
+    """A real, session-issued context (``context_from_session``) for
+    ``account_id``, with ``workspace_id`` as the active workspace."""
+    session_row = create_session(account_id)
+    secret = mint_host_secret(session_row.id, HOST)
+    assert switch_workspace(session_row.id, workspace_id) is None
+    ctx = context_from_session(secret, HOST)
+    assert isinstance(ctx, WorkspaceContext), ctx
+    return ctx
+
+
 @pytest.fixture
 def session_ctx(
     cluster: ClusterSession, workspace: UUID, owner_account_id: UUID
 ) -> WorkspaceContext:
-    """A real, session-issued context (``context_from_session``): the owner,
-    with ``workspace`` as the active workspace."""
-    session_row = create_session(owner_account_id)
-    secret = mint_host_secret(session_row.id, HOST)
-    assert switch_workspace(session_row.id, workspace) is None
-    ctx = context_from_session(secret, HOST)
-    assert isinstance(ctx, WorkspaceContext), ctx
-    return ctx
+    """The owner's real, session-issued context, with ``workspace`` as the
+    active workspace."""
+    return _session_ctx_for(workspace, owner_account_id)
 
 
 def _operator_ctx(workspace_id: UUID) -> WorkspaceContext:
@@ -188,6 +203,81 @@ def test_operator_issued_token_via_real_dispatch_path(
     with cluster.backend.control_engine.connect() as connection:
         stored = list_access_token_operations(connection, token_id)
     assert stored == operations
+
+
+def test_revoke_via_real_dispatch_path(
+    cluster: ClusterSession, workspace: UUID, owner_account_id: UUID
+) -> None:
+    """``core.token.revoke`` driven the real way (mirrors issue's own test
+    above): ``context_for_operator`` -> ``registry.authorize`` -> ``dispatch``,
+    the same path ``rheo token revoke`` takes. Revoking makes the token
+    immediately unusable at presentation."""
+    ctx = _operator_ctx(workspace)
+    value, token_id, _ = _issue(
+        ctx, kind="cli", set_name="read_only", account_id=owner_account_id
+    )
+    outcome = dispatch(ctx, TOKEN_REVOKE, {"token_id": str(token_id)})
+    assert outcome.ok, outcome
+    assert outcome.result is not None
+    assert outcome.result.token_id == token_id  # type: ignore[attr-defined]
+    assert context_from_token(value, "api") == Refusal(TOKEN_REVOKED)
+
+
+def test_member_session_cannot_revoke_another_accounts_token(
+    cluster: ClusterSession, workspace: UUID, owner_account_id: UUID
+) -> None:
+    """B6/``spec.md``'s "member for self" clause, revoke's own half: a
+    member's session context is refused ``not_found`` revoking the owner's
+    token in the same workspace (never told the row exists at all); the
+    operator path -- "operator for another account" is its intended
+    behaviour -- still succeeds on the very same row afterwards."""
+    ctx = _operator_ctx(workspace)
+    _, token_id, _ = _issue(
+        ctx, kind="cli", set_name="read_only", account_id=owner_account_id
+    )
+    member_id = add_member(
+        cluster.backend, workspace, Role.MEMBER, display_name="member-revoke"
+    )
+    member_ctx = _session_ctx_for(workspace, member_id)
+    outcome = dispatch(member_ctx, TOKEN_REVOKE, {"token_id": str(token_id)})
+    assert outcome.state == NOT_FOUND
+    with cluster.backend.control_engine.connect() as connection:
+        untouched = get_access_token(connection, token_id)
+    assert untouched is not None and untouched.revoked_at is None
+
+    operator_outcome = dispatch(ctx, TOKEN_REVOKE, {"token_id": str(token_id)})
+    assert operator_outcome.ok, operator_outcome
+    with cluster.backend.control_engine.connect() as connection:
+        revoked = get_access_token(connection, token_id)
+    assert revoked is not None and revoked.revoked_at is not None
+
+
+def test_set_selection_invalid_when_neither_or_both_given(
+    session_ctx: WorkspaceContext,
+) -> None:
+    """``_expand``'s own guard: exactly one of ``set_name``/``operations``."""
+    neither = dispatch(session_ctx, TOKEN_ISSUE, {"kind": "cli"})
+    assert neither.state == SET_SELECTION_INVALID
+    both = dispatch(
+        session_ctx,
+        TOKEN_ISSUE,
+        {
+            "kind": "cli",
+            "set_name": "read_only",
+            "operations": ["core.workspace.status"],
+        },
+    )
+    assert both.state == SET_SELECTION_INVALID
+
+
+def test_account_required_for_operator_issuance_without_account_id(
+    workspace: UUID,
+) -> None:
+    """An operator issuance with no ``account_id`` has no account to resolve
+    the issuing authority from."""
+    ctx = _operator_ctx(workspace)
+    outcome = dispatch(ctx, TOKEN_ISSUE, {"kind": "cli", "set_name": "read_only"})
+    assert outcome.state == ACCOUNT_REQUIRED
 
 
 def test_agent_default_evaluates_to_registered_tools(

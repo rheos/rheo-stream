@@ -29,7 +29,7 @@ from typing import Final
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from rheo_core.boundary.context import Refusal
+from rheo_core.boundary.context import TOKEN_MALFORMED, Refusal
 from rheo_core.boundary.factories import context_from_token
 from rheo_core.operations import (
     INPUT_INVALID,
@@ -43,7 +43,6 @@ from rheo_core.refs.resolver import NOT_FOUND
 
 router = APIRouter()
 
-_TOKEN_MALFORMED: Final = "token_malformed"
 _TOKEN_REFUSAL_STATUS: Final = 401
 _STATUS_BY_STATE: Final[dict[str, int]] = {
     SUCCEEDED: 200,
@@ -92,8 +91,8 @@ async def run_operation(name: str, request: Request) -> JSONResponse:
     if value is None:
         return JSONResponse(
             _envelope(
-                _TOKEN_MALFORMED,
-                error_code=_TOKEN_MALFORMED,
+                TOKEN_MALFORMED,
+                error_code=TOKEN_MALFORMED,
                 error_text="no bearer token was presented",
             ),
             status_code=_TOKEN_REFUSAL_STATUS,

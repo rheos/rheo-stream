@@ -270,14 +270,31 @@ def issue_handler(
 def revoke_handler(
     ctx: WorkspaceContext, uow: UnitOfWork, model_input: TokenRevokeInput
 ) -> TokenRevoked:
-    """Revoke a token by id, refusing ``not_found`` for one that does not exist
-    *or belongs to another workspace* -- the same non-disclosure principle
-    ``harness.note``'s resolver applies to a cross-workspace reference: a
-    caller in workspace A must not learn that a token id exists in B."""
+    """Revoke a token by id, refusing ``not_found`` for one that does not exist,
+    *belongs to another workspace*, or -- for a session actor -- belongs to
+    another account. All three collapse to the same state and the same
+    non-disclosure principle ``harness.note``'s resolver applies to a
+    cross-workspace reference: a caller must not learn that a token id exists
+    for a workspace or an account that is not theirs.
+
+    ``spec.md``'s own line for this operation is "owner, member for self,
+    operator for another account" -- ``_issuer_permitted_set`` above already
+    honours "member for self" on the issue side (a session actor can only
+    ever target ``ctx.actor.id``, never a payload-supplied account); this is
+    revoke's half of the same rule. An ``ActorKind.OPERATOR`` actor is
+    deliberately exempt from the ownership check below -- "operator for
+    another account" is the intended behaviour there, and
+    ``context_for_operator`` is constructed nowhere but the ``rheo`` CLI's own
+    bootstrap.
+    """
     backend = get_backend()
     with backend.control_engine.begin() as connection:
         row: AccessTokenRow | None = get_access_token(connection, model_input.token_id)
-        if row is None or row.workspace_id != ctx.workspace_id:
+        if (
+            row is None
+            or row.workspace_id != ctx.workspace_id
+            or (ctx.actor.kind is ActorKind.ACCOUNT and row.account_id != ctx.actor.id)
+        ):
             raise OperationRefused(
                 NOT_FOUND, f"no access token {model_input.token_id} in this workspace"
             )
