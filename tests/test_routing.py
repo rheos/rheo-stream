@@ -140,6 +140,49 @@ def test_a_root_surface_path_does_not_double_the_slash() -> None:
     assert url_for(CONFIGS["path"], SHELL, "/") == "https://example.test/"
 
 
+def relocated_identity(mode: str, identity_prefix: str) -> RoutingConfig:
+    """The fixture config with ``routing.identity.path`` moved, as an operator may."""
+    raw = read_fixture(f"{mode}-mode.json")
+    raw["surfaces"]["identity"]["path"] = identity_prefix
+    return RoutingConfig.model_validate(raw)
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_a_root_identity_prefix_is_not_protocol_relative(mode: str) -> None:
+    """``routing.identity.path`` is operator-settable with no closed choice set.
+
+    Raw concatenation turned ``"/"`` into ``"//continue"``, which a browser reads as
+    scheme-relative — a URL for a host named ``continue``, not a path on this one.
+    """
+    config = relocated_identity(mode, "/")
+    assert identity_path(config, "/continue") == "/continue"
+    assert not identity_path(config, "/continue").startswith("//")
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_identity_path_agrees_with_url_for_on_a_relocated_prefix(mode: str) -> None:
+    """The two disagreed in exactly the case the join helper exists for."""
+    config = relocated_identity(mode, "/")
+    assert url_for(config, IDENTITY, "/continue").endswith(
+        identity_path(config, "/continue")
+    )
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_a_path_without_a_leading_slash_is_normalised(mode: str) -> None:
+    """``"/api" + "v1/ops"`` is ``/apiv1/ops`` — silently wrong, not loudly wrong.
+
+    Chunk 10 mirrors ``_join_prefix`` from its description rather than importing it,
+    so the rule has to be the one the docstring states.
+    """
+    config = CONFIGS[mode]
+    assert url_for(config, API, "v1/operations") == url_for(
+        config, API, "/v1/operations"
+    )
+    assert identity_path(config, "continue") == "/auth/continue"
+    assert url_for(config, SHELL, "") == url_for(config, SHELL, "/")
+
+
 def test_the_two_modes_are_not_vacuously_identical() -> None:
     """Every surface case covered in both modes must produce two different URLs."""
     by_case: dict[tuple[str, str], dict[str, str]] = {}
@@ -166,8 +209,13 @@ def test_an_unknown_surface_refuses(mode: str) -> None:
 @pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("surface", [DOCS, INTEGRATION])
 def test_external_and_reserved_surfaces_refuse(surface: str, mode: str) -> None:
-    """This application never builds a link to ``docs.`` or ``tuttle.``."""
-    with pytest.raises(ValueError, match=surface):
+    """This application never builds a link to ``docs.`` or ``tuttle.``.
+
+    Matched on the refusal's own words, not the surface name: the name alone would
+    also match the *unknown-surface* error, so the assertion would still pass against
+    an implementation that had simply lost the surface.
+    """
+    with pytest.raises(ValueError, match="not served by this application"):
         url_for(CONFIGS[mode], surface, "/")
 
 

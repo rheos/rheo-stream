@@ -9,7 +9,9 @@ other surface drops its prefix once it has its own host.
 The join is normalised rather than concatenated. A surface whose path is the root
 (``routing.shell.path`` defaults to ``"/"``) would otherwise contribute a second slash:
 ``"https://example.test" + "/" + "/login"`` is ``https://example.test//login``. One
-helper does the join for both modes so the two branches cannot re-diverge.
+helper does the join for **every** caller — both ``url_for`` branches and
+``identity_path`` — so they cannot re-diverge, and so an operator who relocates a
+surface's path cannot make one of them right and another wrong.
 """
 
 from typing import Final
@@ -23,9 +25,20 @@ ROOT_PREFIXES: Final[frozenset[str]] = frozenset({"", "/"})
 def _join_prefix(prefix: str, path: str) -> str:
     """Join a surface prefix to a path with exactly one ``/`` between them.
 
-    A root prefix contributes nothing. A non-root prefix (``/auth``) carries its own
-    leading slash and never a trailing one, so plain concatenation is right there.
+    The rule in full, because the web tier mirrors this function rather than importing
+    it (B10), and two implementations agreeing on a contract neither honours would
+    satisfy the byte-identical check with two matching wrongs:
+
+    1. ``path`` is normalised to begin with a ``/``, so ``""`` becomes ``"/"`` and
+       ``"v1/ops"`` becomes ``"/v1/ops"``. Without this, ``"/api" + "v1/ops"`` is
+       ``/apiv1/ops`` — a silently wrong URL rather than a loud failure.
+    2. A root prefix (``""`` or ``"/"``) then contributes nothing, which is what stops
+       a root surface path doubling the slash.
+    3. Any other prefix (``/auth``) carries its own leading slash and never a trailing
+       one, so concatenation is correct there.
     """
+    if not path.startswith("/"):
+        path = f"/{path}"
     if prefix in ROOT_PREFIXES:
         return path
     return prefix + path
@@ -58,8 +71,14 @@ def identity_path(config: RoutingConfig, path: str) -> str:
 
     Not ``url_for``: these are served by every application host, so the caller stays
     on the host it is already on and this never crosses one.
+
+    It goes through ``_join_prefix`` for the same reason ``url_for`` does.
+    ``routing.identity.path`` is an operator-settable key with no closed choice set, so
+    an operator who sets it to ``"/"`` would get ``"//continue"`` from raw
+    concatenation — which a browser reads as protocol-relative, i.e. a URL pointing at
+    a host called ``continue``, not a path on this one.
     """
-    return config.surfaces.identity.path + path
+    return _join_prefix(config.surfaces.identity.path, path)
 
 
 def application_hosts(config: RoutingConfig) -> frozenset[str]:
