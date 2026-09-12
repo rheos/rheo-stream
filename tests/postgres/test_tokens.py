@@ -52,7 +52,8 @@ from rheo_core.storage.control_plane import (
 from rheo_core.storage.control_tables import WorkspaceState
 from rheo_core.tokens.format import mint
 from rheo_core.tokens.issue import SET_NOT_ISSUABLE
-from rheo_core.tokens.sets import agent_default
+from rheo_core.tokens.policy import NON_TOKEN_ISSUABLE
+from rheo_core.tokens.sets import agent_default, cli_full
 from sqlalchemy import func, select, update
 
 pytestmark = pytest.mark.postgres
@@ -202,7 +203,16 @@ def test_agent_default_evaluates_to_registered_tools(
 
 def test_cli_full_excludes_the_six_names(session_ctx: WorkspaceContext) -> None:
     """B7, row 18: ``cli_full`` for an owner contains every registered
-    operation except the six ``NON_TOKEN_ISSUABLE`` names."""
+    operation except the six ``NON_TOKEN_ISSUABLE`` names.
+
+    Asserted twice, deliberately: directly against ``sets.cli_full()``'s own
+    return value (independent of ``issue.py``'s own separate strip, so a
+    ``cli_full`` mutant that stopped excluding the six is caught here even
+    though ``issue.py``'s own defense-in-depth would otherwise mask it at the
+    issued-token layer below), and against the actual issued token's
+    persisted snapshot (the end-to-end shape B7 names).
+    """
+    assert cli_full().isdisjoint(NON_TOKEN_ISSUABLE)
     _, _, operations = _issue(session_ctx, kind="cli", set_name="cli_full")
     assert "core.token.issue" not in operations
     assert "core.token.revoke" not in operations
