@@ -19,7 +19,9 @@ from rheo_core.boundary.factories import context_from_session
 from rheo_core.routing import RoutingConfig
 from rheo_core.secrets import SecretRef, SecretRefusal, SecretStore
 from rheo_core.settings import resolve
+from rheo_core.storage.control_plane import list_memberships
 from rheo_core.storage.data_root import resolve_data_root
+from rheo_core.storage.postgres import get_backend
 
 from rheo_app_core.auth_routes import normalize_host
 
@@ -86,12 +88,20 @@ def session_info(
     ctx = context_from_session(secret, normalize_host(x_rheo_host))
     if isinstance(ctx, Refusal):
         return {"state": ctx.state}
+    # context_from_session (factories.py) always builds an account actor, never
+    # token/operator/system/connection -- the same narrowing rheo_core.tokens.issue
+    # makes at its own actor.id use.
+    assert ctx.actor.id is not None
+    backend = get_backend()
+    with backend.control_engine.connect() as connection:
+        memberships = list_memberships(connection, account_id=ctx.actor.id)
     return {
         "state": "ok",
         "actor": {"kind": ctx.actor.kind.value, "id": str(ctx.actor.id)},
         "active_workspace_id": str(ctx.workspace_id),
         "role": ctx.role.value,
         "memberships": [
-            {"workspace_id": str(ctx.workspace_id), "role": ctx.role.value}
+            {"workspace_id": str(row.workspace_id), "role": row.role.value}
+            for row in memberships
         ],
     }

@@ -48,6 +48,8 @@ from rheo_core.sessions import (
     SESSION_COOKIE,
     consume_grant,
     create_session,
+    mint_host_secret,
+    switch_workspace,
     write_grant,
 )
 from rheo_core.storage import control_tables
@@ -56,6 +58,7 @@ from rheo_core.storage.control_plane import (
     insert_account,
     insert_identity,
     insert_session_grant,
+    list_memberships,
 )
 from sqlalchemy import func, select
 
@@ -839,6 +842,94 @@ async def test_member_add_via_cli_then_sign_in_yields_role_member(
         {"key": "identity.token_max_days.cli", "value": 45},
     )
     assert success.ok, success
+
+
+# --- memberships: the account-wide list behind /internal/v1/session's own field ------
+
+
+async def test_internal_session_lists_memberships_across_both_workspaces(
+    monkeypatch: pytest.MonkeyPatch,
+    cluster: ClusterSession,
+    owner_account_id: UUID,
+    workspace: UUID,
+    make_workspace: MakeWorkspace,
+) -> None:
+    """The defect this fixes: ``memberships`` used to be built from the current
+    context alone, so it always had exactly one entry -- the workspace the caller
+    was already in -- which left the web workspace switcher (chunk 10) with
+    nothing to switch to. An account with real memberships in two workspaces must
+    get both back, with the active one present (not filtered out) and correctly
+    marked by the sibling ``active_workspace_id`` field.
+
+    Built directly through ``rheo_core.sessions.service`` (``create_session`` /
+    ``mint_host_secret`` / ``switch_workspace``) rather than replaying the full
+    OAuth dance other tests in this module use: nothing about this defect is
+    login-flow-specific, and this mirrors the existing direct-mechanism idiom
+    ``test_grant_presented_on_the_wrong_host_is_invalid_grant`` already uses above,
+    for the same reason.
+    """
+    _set_routing_mode(monkeypatch, "path")
+    second_workspace = make_workspace(owner=owner_account_id)
+
+    with cluster.backend.control_engine.connect() as connection:
+        rows = list_memberships(connection, account_id=owner_account_id)
+    # The repository's own ordering contract: oldest membership first. `workspace`
+    # (the fixture, provisioned before this test body ran) precedes
+    # `second_workspace` (provisioned just above) -- proving the `created_at`
+    # ordering this run chose, not an arbitrary database order.
+    assert [row.workspace_id for row in rows] == [workspace, second_workspace]
+
+    session_row = create_session(owner_account_id)
+    secret = mint_host_secret(session_row.id, BASE_HOST)
+    assert switch_workspace(session_row.id, workspace) is None
+
+    async with _internal_client() as internal_client:
+        resp = await internal_client.get(
+            "/internal/v1/session",
+            headers={
+                "X-Rheo-Internal": INTERNAL_SECRET_VALUE,
+                "X-Rheo-Session": secret.hex(),
+                "X-Rheo-Host": BASE_HOST,
+            },
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["state"] == "ok"
+    assert body["active_workspace_id"] == str(workspace)
+    assert body["memberships"] == [
+        {"workspace_id": str(workspace), "role": "owner"},
+        {"workspace_id": str(second_workspace), "role": "owner"},
+    ]
+
+
+async def test_internal_session_lists_exactly_one_membership_when_only_one(
+    monkeypatch: pytest.MonkeyPatch,
+    cluster: ClusterSession,
+    owner_account_id: UUID,
+    workspace: UUID,
+) -> None:
+    """Regression: an account in exactly one workspace still gets exactly one
+    membership entry back -- the shape the field already had before this fix, now
+    produced by the real account-wide query instead of by construction from
+    ``ctx`` alone."""
+    _set_routing_mode(monkeypatch, "path")
+    session_row = create_session(owner_account_id)
+    secret = mint_host_secret(session_row.id, BASE_HOST)
+    assert switch_workspace(session_row.id, workspace) is None
+
+    async with _internal_client() as internal_client:
+        resp = await internal_client.get(
+            "/internal/v1/session",
+            headers={
+                "X-Rheo-Internal": INTERNAL_SECRET_VALUE,
+                "X-Rheo-Session": secret.hex(),
+                "X-Rheo-Host": BASE_HOST,
+            },
+        )
+    assert resp.status_code == 200
+    assert resp.json()["memberships"] == [
+        {"workspace_id": str(workspace), "role": "owner"}
+    ]
 
 
 # --- the production/https startup invariant --------------------------------

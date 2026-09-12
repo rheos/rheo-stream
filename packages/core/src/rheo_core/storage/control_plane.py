@@ -407,6 +407,23 @@ def get_membership(
     return None if found is None else _membership(found)
 
 
+def list_memberships(
+    conn: Connection, *, account_id: UUID
+) -> tuple[MembershipRow, ...]:
+    """Every membership row for ``account_id``, across every workspace it belongs
+    to -- oldest first (``created_at``, then ``workspace_id`` to break a tie),
+    the same determinism ``list_workspaces`` uses above. This is what lets a
+    caller build the account's full workspace list, including whichever one is
+    currently active; it does not filter on or otherwise treat any workspace as
+    special."""
+    statement = (
+        select(t.membership)
+        .where(t.membership.c.account_id == account_id)
+        .order_by(t.membership.c.created_at, t.membership.c.workspace_id)
+    )
+    return tuple(_membership(row) for row in conn.execute(statement).mappings())
+
+
 # --- session (C7a, run 0b2) -------------------------------------------------------
 # Local refusal states for the defensive rowcount checks below: these functions are
 # only ever called with an id the caller just created or fetched in the same code
