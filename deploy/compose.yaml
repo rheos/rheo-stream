@@ -56,6 +56,26 @@ services:
       RHEO_DATA_ROOT: /var/lib/rheo-stream
       RHEO_IN_CONTAINER: "1"
       RHEO_PROFILE: development
+      # The internal listener's shared secret (C10). Both `internal.secret_ref`
+      # and `identity.providers.github.client_secret_ref` ship an EMPTY-STRING
+      # package default (07's D4/D5 fix) precisely so a fresh clone's `make
+      # test`/CI stays green before this step exists; this is the deployment
+      # half of that fix, wiring the real `secret://env/...` reference the same
+      # way POSTGRES_PASSWORD above is a dev-only, non-secret placeholder.
+      RHEO_INTERNAL_SECRET: rheo_dev_only_internal_secret
+      RHEO__internal__secret_ref: secret://env/RHEO_INTERNAL_SECRET
+      # The GitHub OAuth app's client secret reference — wired so the setting is
+      # not inert, even though `identity.providers.github.enabled`/`client_id`
+      # stay at their package defaults (false/empty) here: the demo topology
+      # does not need a working GitHub app, only the reference resolved.
+      RHEO_GITHUB_CLIENT_SECRET: ""
+      RHEO__identity__providers__github__client_secret_ref: secret://env/RHEO_GITHUB_CLIENT_SECRET
+      # The routing topology for the local demo: single-host path mode, over
+      # plain http, matching `make demo`'s own web port (`RHEO_WEB_PORT`
+      # default 3000) — see Makefile's `demo` recipe and `deploy/README.md`.
+      RHEO__routing__mode: path
+      RHEO__routing__scheme: http
+      RHEO__routing__base_host: "localhost:3000"
     volumes:
       # Named volume, never a bind mount into the repo, so `make up`/`make demo`
       # write nothing into the tracked tree (criterion 2) — same rule as pgdata.

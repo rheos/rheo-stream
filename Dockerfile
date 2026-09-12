@@ -8,6 +8,17 @@
 # COPYs below are repo-root-relative.
 FROM python:3.12-slim
 
+# curl: not in the base image, and needed inside this container specifically —
+# `make demo` (C10) proves the internal listener is container-network-only by
+# curling it from the host (must fail to connect) and then from inside this
+# same container via `docker compose ... exec` (must succeed), which is the
+# only way to tell "correctly unpublished" apart from "never started". A
+# `--no-install-recommends` apt install kept in its own early layer so it
+# caches independently of source changes below.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Pin uv to an exact version (spec.md Technical Risks, risk 1: uv is the newer
 # pick, so it is pinned rather than floated). Copying the static binary from the
 # official uv image is uv's recommended, reproducible install path.
