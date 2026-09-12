@@ -533,7 +533,7 @@ requires-dist = [
     { name = "rheo-app-mcp", editable = "apps/mcp" },
     { name = "rheo-contracts", editable = "packages/contracts" },
     { name = "rheo-core", editable = "packages/core" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.4" },
 ]
 
 [[package]]
