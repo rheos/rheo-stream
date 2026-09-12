@@ -21,6 +21,7 @@ without this production module ever importing test-only code.
 
 import hashlib
 import secrets
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Annotated
 from urllib.parse import quote, unquote, urlencode, urlsplit
@@ -167,10 +168,14 @@ def _check_origin(request: Request, config: RoutingConfig) -> Response | None:
     return None
 
 
-def resolve_identity_provider() -> IdentityProvider:
-    """The configured identity provider. A FastAPI dependency, not a singleton:
-    tests override it (``app.dependency_overrides``) rather than this module ever
-    importing a test double."""
+def resolve_identity_provider() -> Iterator[IdentityProvider]:
+    """The configured identity provider. A FastAPI **yield** dependency, not a
+    singleton: tests override it (``app.dependency_overrides``) rather than this
+    module ever importing a test double. ``yield`` rather than a plain ``return``
+    so the httpx client this constructs per request is closed when the request
+    finishes, instead of leaking a socket to the garbage collector — a bare
+    ``return`` would build a fresh, never-closed client on every ``/auth/login``
+    and ``/auth/callback``."""
     settings = resolve()
     if not settings.get_bool("identity.providers.github.enabled"):
         raise RuntimeError(
@@ -178,14 +183,18 @@ def resolve_identity_provider() -> IdentityProvider:
             "identity.providers.github.enabled is false"
         )
     secret_store = SecretStore(resolve_data_root().path)
-    return GitHubProvider(
-        client_id=settings.get_str("identity.providers.github.client_id"),
-        client_secret_ref=settings.get_str(
-            "identity.providers.github.client_secret_ref"
-        ),
-        secret_store=secret_store,
-        client=httpx.Client(),
-    )
+    client = httpx.Client()
+    try:
+        yield GitHubProvider(
+            client_id=settings.get_str("identity.providers.github.client_id"),
+            client_secret_ref=settings.get_str(
+                "identity.providers.github.client_secret_ref"
+            ),
+            secret_store=secret_store,
+            client=client,
+        )
+    finally:
+        client.close()
 
 
 # ``Annotated`` rather than a ``Depends(...)`` default value: the latter is a

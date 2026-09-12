@@ -29,6 +29,7 @@ from harness.identity import FIXED_PROVIDER_ID, FixedIdentityProvider
 from rheo_app_cli.main import main as cli_main
 from rheo_app_core import auth_routes
 from rheo_app_core.main import internal_app, public_app
+from rheo_app_core.startup import _check_production_scheme
 from rheo_contracts import Role, WorkspaceContext
 from rheo_core.boundary import context_for_harness
 from rheo_core.boundary.context import (
@@ -281,6 +282,7 @@ async def test_full_identity_flow_and_grant_row_count(
             _assert_cookie_attrs(shell_session_cookie)
             session_value = _cookie_value(shell_session_cookie)
             cleared_continue = _cookie_headers(continue_resp, CONTINUE_COOKIE)[0]
+            _assert_cookie_attrs(cleared_continue)
             assert _cookie_value(cleared_continue) == ""
         else:
             # Path mode: the single host finds the cookie directly and redirects,
@@ -690,7 +692,26 @@ async def test_post_endpoints_require_a_matching_origin(
             json={"target_workspace_id": str(workspace)},
             headers={"Origin": f"https://{BASE_HOST}"},
         )
-    assert good_origin.status_code == 200
+        assert good_origin.status_code == 200
+
+        # The guard is on both state-changing POSTs, not just this one: a mutant
+        # dropping it from /auth/logout specifically would otherwise survive.
+        wrong_origin_logout = await client.post(
+            f"https://{BASE_HOST}/auth/logout",
+            headers={"Origin": "https://evil.example.net"},
+        )
+        assert wrong_origin_logout.status_code == 403
+        assert wrong_origin_logout.json() == {"state": "origin_not_allowed"}
+
+        missing_origin_logout = await client.post(f"https://{BASE_HOST}/auth/logout")
+        assert missing_origin_logout.status_code == 403
+        assert missing_origin_logout.json() == {"state": "origin_not_allowed"}
+
+        good_origin_logout = await client.post(
+            f"https://{BASE_HOST}/auth/logout",
+            headers={"Origin": f"https://{BASE_HOST}"},
+        )
+    assert good_origin_logout.status_code == 302
 
 
 # --- B5: the owner's and the member's own session, over /internal/v1/session ----------
@@ -818,3 +839,17 @@ async def test_member_add_via_cli_then_sign_in_yields_role_member(
         {"key": "identity.token_max_days.cli", "value": 45},
     )
     assert success.ok, success
+
+
+# --- the production/https startup invariant --------------------------------
+
+
+def test_check_production_scheme_refuses_production_over_http() -> None:
+    """New startup safety logic (this chunk's own), mirroring the sibling
+    env-reference check that is already tested: the ``RuntimeError`` fires for
+    ``profile="production"`` with ``scheme="http"`` and does not otherwise."""
+    with pytest.raises(RuntimeError, match="production"):
+        _check_production_scheme("production", "http")
+    _check_production_scheme("production", "https")
+    _check_production_scheme("development", "http")
+    _check_production_scheme("test", "http")
