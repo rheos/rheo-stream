@@ -1,5 +1,7 @@
-"""The three core operations this run registers, matching
+"""The core operations registered under the ``core`` origin, matching
 ``docs/architecture/module-contract.md:96-101`` for names, classes and roles.
+0b1 (C4) shipped the first three below; C8 (09, run 0b2) adds the two token
+operations at the end of this module.
 
 - ``core.workspace.status`` — ``read``; roles ``owner, member, operator``. Reads
   ``core.workspace_composition``, ``core.module_state`` and
@@ -11,10 +13,14 @@
 - ``core.settings.set_member`` — ``mutate``; roles ``owner, member``; writes the
   calling account's own ``core.member_setting`` row — ``account_id`` comes from
   ``ctx.actor.id`` and never from the payload.
+- ``core.token.issue`` / ``core.token.revoke`` — ``mutate``; roles ``owner,
+  member, operator`` (see :data:`TOKEN_ISSUE_DECLARATION`'s own docstring for why
+  ``operator`` is safe to declare here). Handlers live in
+  ``rheo_core.tokens.issue`` — this module only registers them.
 
-Both mutate operations declare ``AuditSpec(subject_field=None)``: C1 fixes
-``AuditSpec`` at exactly that one field, and neither settings operation acts on a
-record. Declaring it is required so 0c2's audit dispatcher re-declares nothing;
+Every mutate operation here declares ``AuditSpec(subject_field=None)``: C1 fixes
+``AuditSpec`` at exactly that one field, and none of these five operations acts on
+a record. Declaring it is required so 0c2's audit dispatcher re-declares nothing;
 acting on it (writing an audit row) is 0c2's and does not happen in this run.
 
 Registration is explicit (:func:`register_core_operations`), not an import side
@@ -65,6 +71,17 @@ from rheo_core.storage.repositories import (
 WORKSPACE_STATUS: Final = "core.workspace.status"
 SETTINGS_SET: Final = "core.settings.set"
 SETTINGS_SET_MEMBER: Final = "core.settings.set_member"
+TOKEN_ISSUE: Final = "core.token.issue"
+TOKEN_REVOKE: Final = "core.token.revoke"
+"""``TOKEN_ISSUE``/``TOKEN_REVOKE`` are literal strings, matching
+``rheo_core.tokens.policy.NON_TOKEN_ISSUABLE``'s own two hardcoded members — see
+that module's docstring for why they are duplicated rather than imported from
+each other (a real import cycle either way)."""
+
+_TOKEN_OPERATION_ROLES: Final = frozenset({Role.OWNER, Role.MEMBER, Role.OPERATOR})
+"""Shared by both token declarations, built inside :func:`register_core_operations`
+— see that function's own docstring for why ``operator`` is safe to declare, and
+``00-index.md``'s coupling notes for the same reasoning stated for the run."""
 
 COMPOSITION_MISSING: Final = "composition_missing"
 ACTOR_REQUIRED: Final = "actor_required"
@@ -241,13 +258,75 @@ CORE_OPERATIONS: Final[tuple[tuple[OperationDeclaration, Handler], ...]] = (
     (SETTINGS_SET_DECLARATION, _settings_set),
     (SETTINGS_SET_MEMBER_DECLARATION, _settings_set_member),
 )
+"""The three 0b1 operations only. The two token operations are not here: see
+:func:`register_core_operations`'s own docstring for why they are built inside
+the function instead of as module-level ``Final`` declarations like these
+three."""
 
 
 def register_core_operations(
     registry: OperationRegistry = REGISTRY,
 ) -> tuple[RegisteredOperation, ...]:
-    """Register the three core operations (idempotent) under the ``core`` origin."""
+    """Register the five core operations (idempotent) under the ``core`` origin.
+
+    The two token declarations are built **here**, inside the function, rather
+    than as module-level constants like :data:`CORE_OPERATIONS`'s three:
+    building them needs ``rheo_core.tokens.issue``'s handlers and models, and a
+    module-level import of that module here would close a real cycle —
+    ``rheo_core.operations``'s own ``__init__.py`` imports this module as its
+    first statement, and ``tokens.issue`` (via ``tokens.sets``) reaches back
+    into ``rheo_core.operations.registry``, so the two modules would each be
+    only partially initialised by the time the other needed it, whichever
+    happened to be imported first. This function is never called as an import
+    side effect (only explicitly, at startup or by a test's own fixture), so
+    deferring the import to here avoids the cycle regardless of import order.
+
+    Declaring ``operator`` in :data:`_TOKEN_OPERATION_ROLES` is safe: both
+    operations are themselves members of ``NON_TOKEN_ISSUABLE``
+    (``rheo_core.tokens.policy``), so no token can ever carry either and
+    present it back at a bearer surface — the only way to reach these two
+    under an operator role is ``context_for_operator``, constructed nowhere
+    but the ``rheo`` CLI's own bootstrap. Omitting ``operator`` here would
+    instead make every ``rheo token issue``/``revoke`` invocation refuse
+    ``role_not_permitted`` before its handler ever ran (mirroring
+    ``WORKSPACE_STATUS_DECLARATION``'s own reason for declaring it).
+    """
+    from rheo_core.tokens.issue import (
+        TokenIssued,
+        TokenIssueInput,
+        TokenRevoked,
+        TokenRevokeInput,
+        issue_handler,
+        revoke_handler,
+    )
+
+    token_operations: tuple[tuple[OperationDeclaration, Handler], ...] = (
+        (
+            OperationDeclaration(
+                name=TOKEN_ISSUE,
+                safety_class=SafetyClass.MUTATE,
+                roles=_TOKEN_OPERATION_ROLES,
+                input_model=TokenIssueInput,
+                output=TokenIssued,
+                idempotency=Idempotency.NONE,
+                audit=AuditSpec(subject_field=None),
+            ),
+            issue_handler,
+        ),
+        (
+            OperationDeclaration(
+                name=TOKEN_REVOKE,
+                safety_class=SafetyClass.MUTATE,
+                roles=_TOKEN_OPERATION_ROLES,
+                input_model=TokenRevokeInput,
+                output=TokenRevoked,
+                idempotency=Idempotency.NONE,
+                audit=AuditSpec(subject_field=None),
+            ),
+            revoke_handler,
+        ),
+    )
     return tuple(
         registry.register(declaration, handler, origin=CORE_ORIGIN)
-        for declaration, handler in CORE_OPERATIONS
+        for declaration, handler in CORE_OPERATIONS + token_operations
     )

@@ -2,13 +2,11 @@
 control-plane SQL lives.
 
 0b1 shipped the ``account``, ``identity``, ``workspace`` and ``membership``
-repositories. This run (0b2, C7a) adds ``session``, ``session_secret``,
+repositories. This run (0b2, C7a) added ``session``, ``session_secret``,
 ``session_grant`` and ``identity_provider``, with their callers and their tests.
-``access_token`` and ``access_token_operation`` arrive with C8 (09), **in this same
-file**; their DDL is already whole in the control revision ``0001_control_plane``.
-There is no placeholder for them here: a function with no caller and no test is what
-burdens a reviewer, and the ratified revision is what the "never edited afterward"
-rule protects.
+C8 (09) adds ``access_token`` and ``access_token_operation`` below, in this same
+file; their DDL was already whole in the control revision ``0001_control_plane``
+from 0b1.
 
 Every function takes the caller's ``Connection`` and runs inside the caller's
 transaction; none commits. Ids are minted here with ``uuid7()`` in the creating
@@ -16,6 +14,7 @@ transaction (A2). Timestamps are ``timestamptz`` and are written from the proces
 clock in UTC.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final
@@ -714,3 +713,184 @@ def get_identity_provider(
         .first()
     )
     return None if found is None else _identity_provider(found)
+
+
+# --- access_token (C8, run 0b2) --------------------------------------------------
+
+ACCESS_TOKEN_MISSING: Final = "access_token_missing"
+"""Local refusal for the defensive rowcount checks below: ``revoke_access_token``/
+``touch_access_token_last_used`` are only ever called with an id a caller just read
+in the same transaction, so a miss here means an internal invariant broke, not a
+reachable API state -- the same reasoning ``session``'s ``SESSION_ROW_MISSING``
+documents for itself above."""
+
+
+@dataclass(frozen=True, slots=True)
+class AccessTokenRow:
+    id: UUID
+    token_hash: bytes
+    account_id: UUID
+    workspace_id: UUID
+    kind: str
+    issued_from: str
+    set_name: str | None
+    purpose: str | None
+    created_at: datetime
+    expires_at: datetime
+    revoked_at: datetime | None
+    last_used_at: datetime | None
+
+
+def _access_token(row: RowMapping) -> AccessTokenRow:
+    return AccessTokenRow(
+        id=row["id"],
+        token_hash=bytes(row["token_hash"]),
+        account_id=row["account_id"],
+        workspace_id=row["workspace_id"],
+        kind=row["kind"],
+        issued_from=row["issued_from"],
+        set_name=row["set_name"],
+        purpose=row["purpose"],
+        created_at=row["created_at"],
+        expires_at=row["expires_at"],
+        revoked_at=row["revoked_at"],
+        last_used_at=row["last_used_at"],
+    )
+
+
+def insert_access_token(
+    conn: Connection,
+    *,
+    account_id: UUID,
+    workspace_id: UUID,
+    kind: str,
+    issued_from: str,
+    token_hash: bytes,
+    set_name: str | None,
+    purpose: str | None,
+    expires_at: datetime,
+) -> AccessTokenRow:
+    """One ``access_token`` row. ``expires_at`` is the caller's
+    (``rheo_core.tokens.issue``'s) job: it alone knows the resolved, floored
+    ``identity.token_max_days.<kind>`` policy for the target workspace.
+    ``account_missing``/``workspace_missing`` on a foreign-key miss."""
+    row = AccessTokenRow(
+        id=uuid7(),
+        token_hash=token_hash,
+        account_id=account_id,
+        workspace_id=workspace_id,
+        kind=kind,
+        issued_from=issued_from,
+        set_name=set_name,
+        purpose=purpose,
+        created_at=_now(),
+        expires_at=expires_at,
+        revoked_at=None,
+        last_used_at=None,
+    )
+    try:
+        conn.execute(
+            insert(t.access_token).values(
+                id=row.id,
+                token_hash=row.token_hash,
+                account_id=row.account_id,
+                workspace_id=row.workspace_id,
+                kind=row.kind,
+                issued_from=row.issued_from,
+                set_name=row.set_name,
+                purpose=row.purpose,
+                created_at=row.created_at,
+                expires_at=row.expires_at,
+                revoked_at=None,
+                last_used_at=None,
+            )
+        )
+    except IntegrityError as exc:
+        if isinstance(exc.orig, psycopg.errors.ForeignKeyViolation):
+            constraint = _constraint_name(exc)
+            if "account" in constraint:
+                raise StorageRefusal(
+                    ACCOUNT_MISSING, f"account {account_id} does not exist"
+                ) from None
+            raise StorageRefusal(
+                WORKSPACE_MISSING, f"workspace {workspace_id} does not exist"
+            ) from None
+        raise
+    return row
+
+
+def get_access_token(conn: Connection, token_id: UUID) -> AccessTokenRow | None:
+    """By primary key -- ``rheo token revoke <id>`` needs a token's own
+    ``workspace_id`` before it can build the operator context ``core.token.revoke``
+    dispatches under."""
+    found = (
+        conn.execute(select(t.access_token).where(t.access_token.c.id == token_id))
+        .mappings()
+        .first()
+    )
+    return None if found is None else _access_token(found)
+
+
+def get_access_token_by_hash(
+    conn: Connection, token_hash: bytes
+) -> AccessTokenRow | None:
+    found = (
+        conn.execute(
+            select(t.access_token).where(t.access_token.c.token_hash == token_hash)
+        )
+        .mappings()
+        .first()
+    )
+    return None if found is None else _access_token(found)
+
+
+def revoke_access_token(conn: Connection, token_id: UUID) -> None:
+    """Set ``revoked_at``; idempotent in effect (a caller never re-revokes)."""
+    result = conn.execute(
+        update(t.access_token)
+        .where(t.access_token.c.id == token_id)
+        .values(revoked_at=_now())
+    )
+    if result.rowcount != 1:
+        raise StorageRefusal(
+            ACCESS_TOKEN_MISSING, f"access token {token_id} has no row"
+        )
+
+
+def touch_access_token_last_used(conn: Connection, token_id: UUID) -> None:
+    result = conn.execute(
+        update(t.access_token)
+        .where(t.access_token.c.id == token_id)
+        .values(last_used_at=_now())
+    )
+    if result.rowcount != 1:
+        raise StorageRefusal(
+            ACCESS_TOKEN_MISSING, f"access token {token_id} has no row"
+        )
+
+
+# --- access_token_operation (C8, run 0b2) ----------------------------------------
+
+
+def insert_access_token_operations(
+    conn: Connection, *, token_id: UUID, operation_names: Iterable[str]
+) -> None:
+    """The snapshot rows for one token, bulk-inserted in one statement. A no-op
+    for an empty iterable (``issue.py`` never reaches this call with one -- it
+    refuses ``set_empty`` first -- but an empty ``INSERT ... VALUES`` is not
+    valid SQL, so this guards it anyway)."""
+    values = [
+        {"token_id": token_id, "operation_name": name} for name in operation_names
+    ]
+    if not values:
+        return
+    conn.execute(insert(t.access_token_operation), values)
+
+
+def list_access_token_operations(conn: Connection, token_id: UUID) -> frozenset[str]:
+    rows = conn.execute(
+        select(t.access_token_operation.c.operation_name).where(
+            t.access_token_operation.c.token_id == token_id
+        )
+    )
+    return frozenset(row.operation_name for row in rows)

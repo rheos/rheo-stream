@@ -69,6 +69,32 @@ SIGNUP_CLOSED: Final = "signup_closed"
 """An unknown identity tried to sign in while signup is closed (an account already
 exists and ``identity.allow_signup`` is not ``true``)."""
 
+# --- 09 (C8) appends the token states below, after 08's nine above --------------
+# Raised by ``rheo_core.tokens.presentation.resolve_token`` and returned through
+# ``context_from_token`` (``boundary/factories.py``). Appended after 07's nine
+# session/grant constants above, per this run's ordering rule: do not touch,
+# reorder or renumber those.
+
+TOKEN_MALFORMED: Final = "token_malformed"
+"""The presented value does not parse as ``rheo_<kind>_<43 chars>``, or its hash
+matches no ``access_token`` row -- deliberately the same state for both: a miss
+gives an attacker no signal about which credential space they guessed into."""
+
+TOKEN_EXPIRED: Final = "token_expired"
+"""``access_token.expires_at`` has passed."""
+
+TOKEN_REVOKED: Final = "token_revoked"
+"""``access_token.revoked_at`` is not null."""
+
+TOKEN_WRONG_KIND: Final = "token_wrong_kind"
+"""The token's ``kind`` is not one the presenting surface accepts (``api``:
+``cli``, ``mcp``; ``mcp``: ``mcp``, ``runtime``)."""
+
+TOKEN_SCOPE_INVALID: Final = "token_scope_invalid"
+"""The token's snapshotted operation set contains one of the six
+non-token-issuable operations -- reachable only from a row inserted outside
+``core.token.issue``, checked anyway so the rule holds at both ends."""
+
 
 @dataclass(frozen=True, slots=True)
 class Refusal:

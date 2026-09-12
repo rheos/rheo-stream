@@ -49,6 +49,15 @@ from rheo_core.storage.control_tables import WorkspaceState
 from rheo_core.storage.postgres import PostgresBackend, get_backend
 from rheo_core.storage.repositories import list_module_states
 
+# A submodule import, not ``from rheo_core.tokens import resolve_token``:
+# ``rheo_core.tokens``'s own ``__init__.py`` deliberately does not re-export
+# ``presentation`` (see that package's docstring) precisely so this edge -- this
+# file, reached from ``rheo_core.boundary``'s own ``__init__.py``, needing
+# ``rheo_core.tokens.presentation``, which itself needs this file's sibling
+# ``rheo_core.boundary.context`` -- resolves regardless of which package a
+# caller happens to import first.
+from rheo_core.tokens.presentation import resolve_token
+
 # The ``core.module_state.state`` value that makes a module enabled; one of
 # ``rheo_core.storage.core_tables.MODULE_STATES``.
 _MODULE_ENABLED = "enabled"
@@ -236,6 +245,42 @@ def context_from_session(
         entry=Entry(entry),
         audience=Audience(kind=AudienceKind.SESSION, id=session_row.account_id),
         operation_set=ALL_OPERATIONS,
+        enabled_modules=enabled,
+        request_id=uuid7(),
+    )
+
+
+def context_from_token(value: str, surface: str) -> WorkspaceContext | Refusal:
+    """A bearer token's context (0b2/C8): the ``api`` surface (``apps/core``) and
+    the MCP facade's ``session.py`` both build against this.
+
+    Implements none of the refusal chain itself: ``rheo_core.tokens.presentation.
+    resolve_token`` is the single implementation (parse, hash lookup,
+    kind-for-surface, expiry, revocation, non-token-issuable scope,
+    membership-at-presentation -- see that module's own docstring for the exact
+    order). This function only turns a :class:`~rheo_core.tokens.presentation.
+    ResolvedToken` into the one object the AST scan in ``tests/test_boundary.py``
+    allows this package to build, running the shared factory tail
+    (``_active_workspace_modules``) exactly as every other factory does.
+
+    Success: actor ``Actor(token, account_id)``, audience ``Audience(token,
+    account_id)``, role from the membership row ``resolve_token`` already read,
+    operation set the snapshot as a ``frozenset[str]``, entry the presenting
+    surface (``api`` or ``mcp``).
+    """
+    resolved = resolve_token(value, surface)
+    if isinstance(resolved, Refusal):
+        return resolved
+    enabled = _active_workspace_modules(get_backend(), resolved.workspace_id)
+    if isinstance(enabled, Refusal):
+        return enabled
+    return WorkspaceContext(
+        workspace_id=resolved.workspace_id,
+        actor=Actor(kind=ActorKind.TOKEN, id=resolved.account_id),
+        role=resolved.role,
+        entry=Entry(surface),
+        audience=Audience(kind=AudienceKind.TOKEN, id=resolved.account_id),
+        operation_set=resolved.operation_set,
         enabled_modules=enabled,
         request_id=uuid7(),
     )
