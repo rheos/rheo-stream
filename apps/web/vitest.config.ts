@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 import { defineConfig } from "vitest/config";
 
 /**
@@ -23,6 +25,14 @@ import { defineConfig } from "vitest/config";
  * over this default.
  */
 export default defineConfig({
+  // The same `@/*` -> `src/*` mapping `tsconfig.json:17-19` gives the compiler and
+  // Next.js the bundler. Without it every source file's `@/lib/...` import would
+  // resolve under `next build` and fail under `vitest run`.
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
