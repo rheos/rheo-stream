@@ -20,15 +20,21 @@ routing inquiries from its own websites and forms. Job search is one optional
 workflow; a workspace can feed Leads from its own funnels and referral partners
 and never touch a job board.
 
-**Status: idea, proposed requirements, and repository scaffold.** There is no
-runnable application yet. The requirements for the first release record
-directions the maintainer already gave, among them the implementation stack (a
-Python core with a Next.js web interface), the storage topology (Postgres, one
-database or schema per workspace), and how much of the module contract that
-release implements. Five further decisions, taken on the maintainer's behalf,
-await ratification through the maintainer's review of the pull request that
-carries them. The full module manifest and the license are still open. Directory
-names mark intended boundaries, not implemented features.
+**Status: phase 0, the walking skeleton, is built.** A Python core (FastAPI)
+and a Next.js web shell run against Postgres, one database per workspace.
+Identity sign-in is GitHub OAuth behind a pluggable provider boundary;
+sessions are host-only cookies with a one-time identity-host grant; the
+core issues its own tokens under a non-token-issuable rule enforced at both
+ends; routing supports path-based and subdomain topologies from one config;
+an operator CLI (`rheo account`, `workspace`, `member`, `token`, `routing`,
+`doctor`) and the first seam of the MCP façade both exist. None of that is
+end-user-visible yet: **no product module has a line of code** — Leads,
+Current, and Recallatron are still empty stubs — and there is no durable
+background work (no outbox, no worker, no scheduled jobs), which the next
+phase builds. The full module manifest and the license are still open.
+Directory names under `modules/`, `connectors/`, `channels/`, `runtimes/`,
+and `packs/` still mark intended boundaries, not implemented features; `apps/`
+and `packages/` no longer do.
 
 Start with the [idea document](docs/ideas/rheo-stream-idea.md). It sets out the
 product thesis, the architecture direction, and a decision ledger that keeps
